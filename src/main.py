@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.coords import get_window_coordinates
 from src.capture import capture_screen_region, find_image_on_screen
-from src.control import click_at
+from src.control import click_at, click_in_window
 
 # Disable pyautogui's failsafe (move mouse to corner to stop)
 # Keep this enabled while testing!
@@ -26,12 +26,17 @@ def main():
     
     if window_coords:
         game_x, game_y, game_width, game_height = window_coords
+        # window_coords is (x, y, width, height) for click_in_window()
     else:
         # Fallback to manual coordinates if window not found
         print("Using manual coordinates as fallback...")
         game_x, game_y = 100, 100  # Top-left corner of game window
         game_width, game_height = 800, 600  # Size of game window
-    
+        window_coords = (game_x, game_y, game_width, game_height)
+
+    # Example: click at fixed coordinates inside the game window (to be determined)
+    # click_in_window(rel_x, rel_y, window_coords)  # e.g. click_in_window(200, 300, window_coords)
+
     while True:
         # Capture the game area
         screen = capture_screen_region(game_x, game_y, game_width, game_height)
