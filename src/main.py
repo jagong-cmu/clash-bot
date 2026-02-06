@@ -21,8 +21,8 @@ def main():
     time.sleep(3)
     
     # Automatically detect game window (adjust the window name as needed)
-    # Common names: "Clash Royale", "BlueStacks", "NoxPlayer", etc.
-    window_coords = get_window_coordinates("Clash Royale")  # Change this to your game window name
+    # e.g. "iPhone Mirroring", "Clash Royale", "BlueStacks", etc.
+    window_coords = get_window_coordinates("iPhone Mirroring")
     
     if window_coords:
         game_x, game_y, game_width, game_height = window_coords

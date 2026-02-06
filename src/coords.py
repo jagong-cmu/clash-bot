@@ -64,51 +64,26 @@ def get_window_coordinates(window_name):
         width, height: Window dimensions
     """
     search_lower = window_name.lower()
-    # Escape double quotes for AppleScript
-    search_escaped = search_lower.replace('\\', '\\\\').replace('"', '\\"')
-
-    # Match by process name OR window name, case-insensitive
-    # AppleScript has no "to lower"; use shell to get lowercase
+    # Get all windows in one pass (no slow "do shell script" per window)
     applescript = '''
     tell application "System Events"
-        set searchStr to "{}"
+        set out to ""
         repeat with proc in processes
             try
                 set procName to name of proc
-                if (procName is not "") then
-                    try
-                        set procNameLower to do shell script "echo " & quoted form of (procName as text) & " | tr '[:upper:]' '[:lower:]'"
-                        if procNameLower contains searchStr then
-                            set wins to windows of proc
-                            if (count of wins) > 0 then
-                                set w to item 1 of wins
-                                set pos to position of w
-                                set sz to size of w
-                                return (item 1 of pos) & "," & (item 2 of pos) & "," & (item 1 of sz) & "," & (item 2 of sz)
-                            end if
-                        end if
-                    end try
-                end if
                 repeat with w in (windows of proc)
                     try
                         set winName to name of w
-                        if (winName is not "") then
-                            try
-                                set winNameLower to do shell script "echo " & quoted form of (winName as text) & " | tr '[:upper:]' '[:lower:]'"
-                                if winNameLower contains searchStr then
-                                    set pos to position of w
-                                    set sz to size of w
-                                    return (item 1 of pos) & "," & (item 2 of pos) & "," & (item 1 of sz) & "," & (item 2 of sz)
-                                end if
-                            end try
-                        end if
+                        set pos to position of w
+                        set sz to size of w
+                        set out to out & (procName as text) & "|" & (winName as text) & "|" & (item 1 of pos) & "," & (item 2 of pos) & "," & (item 1 of sz) & "," & (item 2 of sz) & (ASCII character 10)
                     end try
                 end repeat
             end try
         end repeat
-        return "NOT_FOUND"
+        return out
     end tell
-    '''.format(search_escaped)
+    '''
 
     try:
         result = subprocess.run(
@@ -116,30 +91,36 @@ def get_window_coordinates(window_name):
             capture_output=True,
             text=True,
             check=True,
-            timeout=10,
+            timeout=15,
         )
         output = result.stdout.strip()
-
-        if output == "NOT_FOUND":
-            print(f"Window '{window_name}' not found. Run list_open_windows() to see exact app/window names.")
-            return None
-
-        # Parse "x,y,width,height" — AppleScript can sometimes return empty or extra fields
-        parts = [p.strip() for p in output.split(',') if p.strip()]
-        if len(parts) != 4:
-            print(f"Error parsing window coordinates: got {len(parts)} values (expected 4). Raw output: {output!r}")
-            return None
-        try:
-            x, y, width, height = [int(p) for p in parts]
-        except ValueError:
-            print(f"Error parsing window coordinates: expected four integers, got {output!r}")
-            return None
-
-        print(f"Found window '{window_name}' at ({x}, {y}) with size {width}x{height}")
-        return (x, y, width, height)
-
+    except subprocess.TimeoutExpired:
+        print("Window listing timed out. Try closing some apps or increase timeout in coords.py.")
+        return None
     except subprocess.CalledProcessError as e:
         print(f"Error finding window: {e}")
         if e.stderr:
             print(e.stderr)
         return None
+
+    # Case-insensitive search in Python
+    for line in output.split('\n'):
+        if '|' not in line:
+            continue
+        parts = line.split('|', 2)  # procName | winName | x,y,w,h
+        if len(parts) < 3:
+            continue
+        proc_name, win_name, coords_str = parts[0].strip(), parts[1].strip(), parts[2].strip()
+        if search_lower in proc_name.lower() or search_lower in win_name.lower():
+            coords = [p.strip() for p in coords_str.split(',') if p.strip()]
+            if len(coords) != 4:
+                continue
+            try:
+                x, y, width, height = [int(c) for c in coords]
+            except ValueError:
+                continue
+            print(f"Found window '{window_name}' at ({x}, {y}) with size {width}x{height}")
+            return (x, y, width, height)
+
+    print(f"Window '{window_name}' not found. Run list_open_windows() to see exact app/window names.")
+    return None
