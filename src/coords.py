@@ -15,12 +15,13 @@ def get_window_coordinates(window_name):
         width, height: Window dimensions
     """
     # AppleScript to find window by name and get its bounds
-    applescript = f'''
+    # Note: {{}} escapes curly braces for literal use in AppleScript
+    applescript = '''
     tell application "System Events"
-        set windowList to {}
+        set windowList to {{}}
         repeat with proc in processes
             try
-                set windowList to windowList & (windows of proc whose name contains "{window_name}")
+                set windowList to windowList & (windows of proc whose name contains "{}")
             end try
         end repeat
         
@@ -33,7 +34,7 @@ def get_window_coordinates(window_name):
             return "NOT_FOUND"
         end if
     end tell
-    '''
+    '''.format(window_name)
     
     try:
         # Run AppleScript
