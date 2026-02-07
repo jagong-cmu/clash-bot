@@ -72,11 +72,26 @@ class ArenaDetector:
         state_dict, class_names, num_classes = _load_checkpoint(path)
         self.class_names = class_names
         self.num_classes = num_classes
-        self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        # Use MPS (Metal) on Mac, CUDA on Linux/Windows, else CPU
+        if device:
+            self.device = device
+        elif torch.cuda.is_available():
+            self.device = "cuda"
+        elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            self.device = "mps"  # Mac GPU acceleration
+        else:
+            self.device = "cpu"
         self.model: RetinaNet = retinanet_resnet50_fpn(num_classes=num_classes, weights=None)
         self.model.load_state_dict(state_dict, strict=True)
         self.model.to(self.device)
         self.model.eval()
+        # Print device info for debugging
+        if self.device == "mps":
+            print(f"Arena detector using MPS (Mac GPU) for acceleration")
+        elif self.device == "cuda":
+            print(f"Arena detector using CUDA (GPU) for acceleration")
+        else:
+            print(f"Arena detector using CPU (no GPU acceleration)")
 
     def predict(
         self,

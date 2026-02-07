@@ -60,9 +60,15 @@ def main():
             # Check inference version
             try:
                 import inference
+                import platform
                 version = getattr(inference, "__version__", "unknown")
-                if version.startswith("0."):
-                    print(f"  Note: inference version {version} detected. Upgrade to 1.0.x with 'pip install --upgrade --pre inference' to fix resize method errors.")
+                if version.startswith("1."):
+                    print(f"  ✓ inference {version} (should fix resize method errors)")
+                elif version.startswith("0."):
+                    print(f"  ⚠ inference {version} detected. Upgrade to 1.0.x with 'pip install --upgrade --pre inference' to fix resize method errors.")
+                # Note about GPU on Mac
+                if platform.system() == "Darwin":
+                    print(f"  ℹ On Mac: CoreML/Apple Neural Engine will be used for GPU acceleration (if available)")
             except:
                 pass
         else:

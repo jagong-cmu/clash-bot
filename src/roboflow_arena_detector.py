@@ -56,6 +56,12 @@ def _load_model() -> Optional[Any]:
         )
         return None
     try:
+        import platform
+        # Prefer CoreML on Mac for GPU acceleration
+        if platform.system() == "Darwin":  # macOS
+            import os
+            # Set ONNX Runtime to prefer CoreML (uses Apple Neural Engine/GPU)
+            os.environ.setdefault("ONNXRUNTIME_EXECUTION_PROVIDERS", "CoreMLExecutionProvider,CPUExecutionProvider")
         from inference import get_model
         _roboflow_model = get_model(model_id=model_id, api_key=api_key)
         return _roboflow_model

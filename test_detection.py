@@ -36,6 +36,7 @@ from src.classifier import (
     get_load_error as classifier_load_error,
     predict_card_topk,
 )
+from src.elixir_tracker import OpponentElixirTracker
 
 # Paths relative to project root
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -111,14 +112,17 @@ def main():
         except ImportError as e:
             print("Audio deps missing (pip install sounddevice numpy scipy); skipping audio:", e)
 
+    elixir_tracker = OpponentElixirTracker()
     if args.loop > 0:
         print(f"Looping every {args.loop}s. Focus the game window; press Ctrl+C to stop.")
         time.sleep(2)
         loop_interval = args.loop
+        elixir_tracker.start()
     else:
         print("Capturing in 2 seconds... Focus the game window.")
         time.sleep(2)
         loop_interval = None
+        elixir_tracker.start()
 
     def run_one_capture():
         screen = capture_screen_region(game_x, game_y, game_width, game_height)
@@ -143,6 +147,9 @@ def main():
                 if any(getattr(args, a) is not None for a in ("hand_top", "hand_bottom", "hand_left", "hand_right")):
                     print("  To save these bounds permanently, edit config/hand_slots.py with the same values.")
                 run_one_capture._slots_saved = True
+        # Opponent elixir (tracked from game start, 1 elixir per 2.8 sec)
+        opp_elixir = elixir_tracker.get_opponent_elixir()
+        print(f"Opponent elixir: {opp_elixir:.1f}  (elapsed: {elixir_tracker.elapsed_seconds():.0f}s)")
         # Cards in hand (classifier or template matching)
         hand_matches = detect_cards_in_hand(
             screen,
