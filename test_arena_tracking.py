@@ -21,9 +21,17 @@ import argparse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import cv2
 from src.coords import get_window_coordinates
 from src.capture import capture_screen_region
-from src.detection import load_card_templates, ArenaTracker, _get_roboflow_arena_detector, _arena_detector_available, _get_arena_detector
+from src.detection import (
+    load_card_templates,
+    ArenaTracker,
+    get_arena_region,
+    _get_roboflow_arena_detector,
+    _arena_detector_available,
+    _get_arena_detector,
+)
 
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 ARENA_DIR = os.path.join(PROJECT_ROOT, "assets", "arena")
@@ -34,6 +42,7 @@ def main():
     parser.add_argument("--window", default="iPhone Mirroring", help="Window name to capture")
     parser.add_argument("--threshold", type=float, default=0.5, help="Confidence threshold (detector or templates)")
     parser.add_argument("--loop", type=float, metavar="SEC", default=0, help="Run every SEC seconds (0 = once)")
+    parser.add_argument("--save-arena", metavar="PATH", default=None, help="Save the arena crop to PATH and exit (to verify crop region)")
     args = parser.parse_args()
 
     arena_detector = _get_roboflow_arena_detector()
@@ -61,6 +70,26 @@ def main():
         print(f"Window '{args.window}' not found.")
         return 1
     game_x, game_y, game_width, game_height = coords
+
+    if args.save_arena:
+        print("Capturing in 2s to save arena crop...")
+        time.sleep(2)
+        screen = capture_screen_region(game_x, game_y, game_width, game_height)
+        if screen is None or screen.size == 0:
+            print("Capture failed.")
+            return 1
+        x1, y1, x2, y2 = get_arena_region()
+        h, w = screen.shape[:2]
+        px1, py1 = int(x1 * w), int(y1 * h)
+        px2, py2 = int(x2 * w), int(y2 * h)
+        arena_crop = screen[py1:py2, px1:px2]
+        path = os.path.abspath(os.path.expanduser(args.save_arena))
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        cv2.imwrite(path, arena_crop)
+        print("Saved arena crop to:", path)
+        print("Open it and check: it should show only the battlefield (no hand, no top UI).")
+        print("If not, edit config/arena_region.py (ARENA_TOP/BOTTOM/LEFT/RIGHT).")
+        return 0
 
     tracker = ArenaTracker(max_distance_px=60, max_frames_lost=10)
     if args.loop > 0:

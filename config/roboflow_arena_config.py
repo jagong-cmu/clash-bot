@@ -13,4 +13,9 @@ ROBOFLOW_ARENA_MODEL_ID = "clash-royale-troop-detection-dkcsn/1"
 
 # Your Roboflow API key. Get it from: https://app.roboflow.com/settings/api
 # You can set it here or leave None and use the ROBOFLOW_API_KEY environment variable.
-ROBOFLOW_API_KEY = "rf_jG765AUDjPYumzmEmGNwNlrj4aI2" # e.g. "rf_xxxxxxxxxxxxxxxxxxxxxxxx"
+ROBOFLOW_API_KEY = "rf_jG765AUDjPYumzmEmGNwNlrj4aI2"
+
+# Run the detector on the full window instead of the arena crop. Many Universe models
+# were trained on full screenshots; if you get no detections, set this to True.
+# Set to False if you use a local model (arena_detector.pth) trained on arena crops only.
+USE_FULL_FRAME = True

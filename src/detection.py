@@ -80,11 +80,16 @@ try:
 except (ImportError, AttributeError):
     pass
 
-# ——— Arena (playable battlefield) ———
+# ——— Arena (playable battlefield). Override from config/arena_region.py if it exists. ———
 ARENA_TOP    = 0.12
 ARENA_BOTTOM = 0.70
 ARENA_LEFT   = 0.02
 ARENA_RIGHT  = 0.98
+try:
+    from config.arena_region import ARENA_TOP as _at, ARENA_BOTTOM as _ab, ARENA_LEFT as _al, ARENA_RIGHT as _ar
+    ARENA_TOP, ARENA_BOTTOM, ARENA_LEFT, ARENA_RIGHT = _at, _ab, _al, _ar
+except (ImportError, AttributeError):
+    pass
 
 # Build 4 slot regions (left to right)
 def _hand_slot_regions(custom_top=None, custom_bottom=None, custom_left=None, custom_right=None):
@@ -335,14 +340,28 @@ def detect_units_on_arena(
     if detector is None:
         detector = _get_arena_detector()
     if detector is not None:
-        dets = detector.predict(arena_crop, confidence_threshold=threshold)
-        results: list[ArenaUnitMatch] = []
-        for unit_id, conf, cx, cy in dets:
-            # cx, cy are in crop coords; convert to frame
-            frame_cx = px1 + cx
-            frame_cy = py1 + cy
-            side = "left" if frame_cx < arena_center_x else "right"
-            results.append(ArenaUnitMatch(unit_id=unit_id, confidence=conf, center_x=frame_cx, center_y=frame_cy, side=side))
+        use_full_frame = False
+        try:
+            from config.roboflow_arena_config import USE_FULL_FRAME as _uff
+            use_full_frame = bool(_uff)
+        except (ImportError, AttributeError):
+            pass
+        if use_full_frame:
+            # Many Roboflow models are trained on full screenshots; run on full frame then filter to arena
+            dets = detector.predict(screenshot, confidence_threshold=threshold)
+            results = []
+            for unit_id, conf, cx, cy in dets:
+                if px1 <= cx <= px2 and py1 <= cy <= py2:
+                    side = "left" if cx < arena_center_x else "right"
+                    results.append(ArenaUnitMatch(unit_id=unit_id, confidence=conf, center_x=int(cx), center_y=int(cy), side=side))
+        else:
+            dets = detector.predict(arena_crop, confidence_threshold=threshold)
+            results = []
+            for unit_id, conf, cx, cy in dets:
+                frame_cx = px1 + cx
+                frame_cy = py1 + cy
+                side = "left" if frame_cx < arena_center_x else "right"
+                results.append(ArenaUnitMatch(unit_id=unit_id, confidence=conf, center_x=frame_cx, center_y=frame_cy, side=side))
         return results
 
     # Fallback: template matching
