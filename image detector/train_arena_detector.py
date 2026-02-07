@@ -170,6 +170,7 @@ def main():
     model.to(device)
     params = [p for p in model.parameters() if p.requires_grad]
     optimizer = torch.optim.AdamW(params, lr=args.lr)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs, eta_min=1e-6)
 
     print("Classes:", class_names)
     print("Device:", device)
@@ -207,6 +208,7 @@ def main():
                     nv += 1
             if nv:
                 print(f"  val loss: {val_loss / nv:.4f}")
+        scheduler.step()
 
     os.makedirs(os.path.dirname(args.model_out) or ".", exist_ok=True)
     ckpt = {

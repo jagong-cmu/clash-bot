@@ -43,6 +43,8 @@ def main():
     parser.add_argument("--threshold", type=float, default=0.5, help="Confidence threshold (detector or templates)")
     parser.add_argument("--loop", type=float, metavar="SEC", default=0, help="Run every SEC seconds (0 = once)")
     parser.add_argument("--save-arena", metavar="PATH", default=None, help="Save the arena crop to PATH and exit (to verify crop region)")
+    parser.add_argument("--save-troops", metavar="DIR", default=None, help="Save a crop of each detected troop to DIR (filename: troop_<id>_<unit>_<conf>.png)")
+    parser.add_argument("--troop-crop-size", type=int, default=96, help="Side length of the square crop around each troop (default 96)")
     args = parser.parse_args()
 
     arena_detector = _get_roboflow_arena_detector()
@@ -92,6 +94,13 @@ def main():
         return 0
 
     tracker = ArenaTracker(max_distance_px=60, max_frames_lost=10)
+    save_troops_dir = os.path.abspath(os.path.expanduser(args.save_troops)) if args.save_troops else None
+    if save_troops_dir:
+        os.makedirs(save_troops_dir, exist_ok=True)
+        print("Saving troop crops to:", save_troops_dir)
+    half = max(1, args.troop_crop_size // 2)
+    run_counter = 0
+
     if args.loop > 0:
         print(f"Tracking every {args.loop}s. Ctrl+C to stop.")
         time.sleep(1)
@@ -100,9 +109,10 @@ def main():
         time.sleep(2)
 
     def run():
+        nonlocal run_counter
         screen = capture_screen_region(game_x, game_y, game_width, game_height)
         if screen is None or screen.size == 0:
-            return
+            return None
         tracks = tracker.update(
             screen,
             arena_templates=arena_templates,
@@ -114,8 +124,22 @@ def main():
             print("Tracked units (id, unit, side, position):")
             for t in tracks:
                 print(f"  [{t.track_id}] {t.unit_id} ({t.side}) at ({t.x}, {t.y}) conf={t.confidence:.2f}")
+                if save_troops_dir and screen is not None:
+                    h, w = screen.shape[:2]
+                    x1 = max(0, t.x - half)
+                    y1 = max(0, t.y - half)
+                    x2 = min(w, t.x + half)
+                    y2 = min(h, t.y + half)
+                    if x2 > x1 and y2 > y1:
+                        crop = screen[y1:y2, x1:x2]
+                        safe_name = "".join(c if c.isalnum() or c in "._-" else "_" for c in str(t.unit_id))
+                        fname = f"troop_{run_counter}_{t.track_id}_{safe_name}_{t.confidence:.2f}.png"
+                        path = os.path.join(save_troops_dir, fname)
+                        cv2.imwrite(path, crop)
+                        print(f"    -> saved: {fname}")
         else:
             print("No units on arena this frame.")
+        run_counter += 1
         return screen
 
     run()
@@ -127,6 +151,8 @@ def main():
                 run()
         except KeyboardInterrupt:
             print("\nStopped.")
+    elif save_troops_dir:
+        print("Troop images saved to:", save_troops_dir)
 
     return 0
 
