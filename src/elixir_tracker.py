@@ -32,7 +32,7 @@ CARD_ELIXIR: dict[str, int] = {
     # 5 elixir
     "giant": 5, "balloon": 5, "wizard": 5, "inferno_tower": 5, "barbarians": 5,
     "minion_horde": 5, "bowler": 5, "electro_dragon": 5, "cannon_cart": 5,
-    "royal_hogs": 5, "elite_barbarians": 5, "witch": 5, "royal_recruits": 5,
+    "royal_hogs": 5, "elite_barbarians": 5, "witch": 5,
     # 6 elixir
     "royal_giant": 6, "rocket": 6, "sparky": 6, "elixir_collector": 6,
     "barbarian_hut": 6, "x_bow": 6,
