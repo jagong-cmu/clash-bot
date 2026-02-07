@@ -1,0 +1,3 @@
+# Project dependencies
+# Roboflow arena detection (optional; requires Python 3.9–3.12)
+inference>=0.64.0,<1.0

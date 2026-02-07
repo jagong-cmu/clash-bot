@@ -13,4 +13,4 @@ ROBOFLOW_ARENA_MODEL_ID = "clash-royale-troop-detection-dkcsn/1"
 
 # Your Roboflow API key. Get it from: https://app.roboflow.com/settings/api
 # You can set it here or leave None and use the ROBOFLOW_API_KEY environment variable.
-ROBOFLOW_API_KEY = "3UnFOtuZ2ig5FUoImoB0  # e.g. "rf_xxxxxxxxxxxxxxxxxxxxxxxx"
+ROBOFLOW_API_KEY = "3UnFOtuZ2ig5FUoImoB0"  # from https://app.roboflow.com/settings/api

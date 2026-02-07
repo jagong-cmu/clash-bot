@@ -24,6 +24,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from src.coords import get_window_coordinates
 from src.capture import capture_screen_region
 from src.detection import load_card_templates, ArenaTracker, _get_roboflow_arena_detector, _arena_detector_available, _get_arena_detector
+from src.roboflow_arena_detector import get_unavailable_reason
 
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 ARENA_DIR = os.path.join(PROJECT_ROOT, "assets", "arena")
@@ -49,6 +50,9 @@ def main():
             print("Using local arena detector (arena_detector.pth)")
     elif arena_templates:
         print(f"Using template matching: {len(arena_templates)} templates in assets/arena/")
+        reason = get_unavailable_reason()
+        if reason:
+            print(f"  (Roboflow not used: {reason})")
     else:
         print("No arena detector available.")
         print("Option 1: Configure Roboflow model in config/roboflow_arena_config.py and set ROBOFLOW_API_KEY")

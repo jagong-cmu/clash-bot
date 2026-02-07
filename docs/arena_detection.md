@@ -8,8 +8,17 @@ Arena detection can use, in order: **Roboflow Universe** (pre-trained model), **
 
 Use a public Clash Royale troop detection model from Roboflow without training.
 
-1. **Install** the inference package:
+**Important:** The `inference` package requires **Python 3.9–3.12**. Python 3.13+ is not supported. If `pip install inference` fails with "Could not find a version that satisfies the requirement", you are likely using Python 3.14 or 3.13.
+
+1. **Install** the inference package. Use Python 3.11 or 3.12 (create a fresh venv if needed):
    ```bash
+   # If you have Python 3.14, install Python 3.12 first:
+   #   brew install python@3.12
+
+   # Create venv with Python 3.12:
+   python3.12 -m venv .venv
+   source .venv/bin/activate   # or: .venv\Scripts\activate on Windows
+
    pip install inference
    ```
 2. **Get an API key** from [Roboflow](https://app.roboflow.com/settings/api).

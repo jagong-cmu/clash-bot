@@ -17,6 +17,7 @@ import numpy as np
 
 # Lazy load so we don't require 'inference' unless Roboflow is used
 _roboflow_model: Optional[Any] = None
+_unavailable_reason: Optional[str] = None
 
 
 def _get_config() -> Tuple[Optional[str], Optional[str]]:
@@ -41,20 +42,32 @@ def _get_config() -> Tuple[Optional[str], Optional[str]]:
 
 def _load_model() -> Optional[Any]:
     """Load Roboflow model once. Returns the model object or None."""
-    global _roboflow_model
+    global _roboflow_model, _unavailable_reason
     if _roboflow_model is not None:
         return _roboflow_model
+    _unavailable_reason = None
     model_id, api_key = _get_config()
     if not model_id:
+        _unavailable_reason = "ROBOFLOW_ARENA_MODEL_ID not set in config/roboflow_arena_config.py"
         return None
     if not api_key:
+        _unavailable_reason = (
+            "ROBOFLOW_API_KEY not set. Set it in config/roboflow_arena_config.py or export ROBOFLOW_API_KEY"
+        )
         return None
     try:
         from inference import get_model
         _roboflow_model = get_model(model_id=model_id, api_key=api_key)
         return _roboflow_model
-    except Exception:
+    except Exception as e:
+        _unavailable_reason = f"Roboflow model load failed: {e}"
         return None
+
+
+def get_unavailable_reason() -> Optional[str]:
+    """If Roboflow is not available, return a short reason; otherwise None."""
+    _load_model()  # ensure we've tried to load and set _unavailable_reason
+    return _unavailable_reason
 
 
 def is_available() -> bool:
