@@ -25,7 +25,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import cv2
 from src.coords import get_window_coordinates
 from src.capture import capture_screen_region
-from src.detection import load_card_templates, detect_cards_in_hand
+from src.detection import load_card_templates, detect_cards_in_hand, DEFAULT_SLOT_REGIONS
 from src.classifier import is_available as classifier_available, get_load_error as classifier_load_error
 
 # Paths relative to project root
@@ -40,7 +40,8 @@ def main():
     parser.add_argument("--window", default="iPhone Mirroring", help="Window name to capture")
     parser.add_argument("--threshold", type=float, default=0.5, help="Confidence threshold for classifier / match threshold (0-1)")
     parser.add_argument("--templates", action="store_true", help="Use template matching for hand instead of classifier")
-    parser.add_argument("--save", metavar="FILE", help="Save captured frame to FILE (e.g. frame.png) to inspect what the bot sees")
+    parser.add_argument("--save", metavar="FILE", help="Save full captured frame to FILE (e.g. frame.png)")
+    parser.add_argument("--save-slots", metavar="DIR", help="Save the 4 slot crops to DIR (slot_0.png .. slot_3.png) to check crop regions")
     parser.add_argument("--loop", type=float, metavar="SEC", help="Run detection every SEC seconds until Ctrl+C (e.g. --loop 2)")
     args = parser.parse_args()
 
@@ -103,6 +104,18 @@ def main():
             cv2.imwrite(args.save, screen)
             print(f"Saved frame to {args.save}")
             run_one_capture._saved = True
+        if args.save_slots:
+            os.makedirs(args.save_slots, exist_ok=True)
+            h, w = screen.shape[:2]
+            for slot, (x1, y1, x2, y2) in enumerate(DEFAULT_SLOT_REGIONS):
+                px1, py1 = int(x1 * w), int(y1 * h)
+                px2, py2 = int(x2 * w), int(y2 * h)
+                crop = screen[py1:py2, px1:px2]
+                path = os.path.join(args.save_slots, f"slot_{slot}.png")
+                cv2.imwrite(path, crop)
+            if not getattr(run_one_capture, "_slots_saved", False):
+                print(f"Saved slot crops to {args.save_slots}/")
+                run_one_capture._slots_saved = True
         # Cards in hand (classifier or template matching)
         hand_matches = detect_cards_in_hand(
             screen,
