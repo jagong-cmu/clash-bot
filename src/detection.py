@@ -2,8 +2,8 @@
 Troop and spell detection for Clash Royale.
 
 - **In hand:** trained classifier (image detector/card_classifier.pth) by default; optional template-matching fallback.
-- **On arena:** 1) Roboflow Universe model (if configured), 2) local RetinaNet (arena_detector.pth), 3) template
-  matching (assets/arena/).
+- **On arena:** trained RetinaNet only (image detector/arena_detector.pth). Train with train_arena_detector.py on
+  COCO-style data in data/arena_dataset.
 """
 
 import os
@@ -26,23 +26,16 @@ _arena_detector_instance: Optional[Any] = None
 _pyclashbot_arena_detector_instance: Optional[Any] = None
 
 def _get_pyclashbot_arena_detector() -> Optional[Any]:
-    """Load PyClashBot-style arena detector if configured and reference folder has images."""
+    """Load PyClashBot-style arena detector (only arena detection method used)."""
     global _pyclashbot_arena_detector_instance
     if _pyclashbot_arena_detector_instance is not None:
         return _pyclashbot_arena_detector_instance
-    use_pyclashbot = False
     try:
-        from config.arena_detection_config import USE_PYCLASHBOT_ARENA
-        use_pyclashbot = bool(USE_PYCLASHBOT_ARENA)
-    except (ImportError, AttributeError):
+        from src.pyclashbot_arena import is_available as _avail, load_detector as _load
+        if _avail():
+            _pyclashbot_arena_detector_instance = _load()
+    except Exception:
         pass
-    if use_pyclashbot:
-        try:
-            from src.pyclashbot_arena import is_available as _avail, load_detector as _load
-            if _avail():
-                _pyclashbot_arena_detector_instance = _load()
-        except Exception:
-            pass
     return _pyclashbot_arena_detector_instance
 
 def _get_roboflow_arena_detector() -> Optional[Any]:
@@ -325,23 +318,23 @@ def get_arena_region() -> tuple[float, float, float, float]:
 def detect_units_on_arena(
     screenshot: np.ndarray,
     arena_templates: Optional[dict[str, np.ndarray]] = None,
-    threshold: float = 0.75,
+    threshold: float = 0.5,
     scales: Optional[list[float]] = None,
     arena_detector: Optional[Any] = None,
 ) -> list[ArenaUnitMatch]:
     """
     Detect troops/spells on the battlefield (arena).
 
-    Detection order: 1) PyClashBot-style (if USE_PYCLASHBOT_ARENA and assets/arena/),
-    2) Roboflow Universe, 3) local RetinaNet (arena_detector.pth), 4) template matching (arena_templates).
-    Pass arena_detector to force a specific detector instance.
+    Uses only the trained RetinaNet (image detector/arena_detector.pth). Train with
+    train_arena_detector.py on COCO-style data in data/arena_dataset. Runs on the
+    arena crop; coordinates are returned in full-frame space.
 
     Args:
         screenshot: Full game frame (BGR).
-        arena_templates: Optional dict unit_id -> template; used only when no detector.
-        threshold: Min confidence (detector) or match score (templates). 0.0–1.0.
-        scales: Template scales when using templates (e.g. [0.7, 1.0, 1.3]). Ignored if detector used.
-        arena_detector: Optional detector instance (Roboflow or local). If None, auto-selects.
+        arena_templates: Unused (kept for API compatibility).
+        threshold: Min confidence (0.0–1.0). Default 0.5.
+        scales: Unused (kept for API compatibility).
+        arena_detector: Optional detector instance. If None, uses trained model.
 
     Returns:
         List of ArenaUnitMatch (unit_id, confidence, center_x, center_y, side) in frame coordinates.
@@ -355,82 +348,17 @@ def detect_units_on_arena(
     if arena_crop.size == 0:
         return []
 
-    use_template_only = False
-    try:
-        from config.arena_detection_config import USE_TEMPLATE_MATCHING_ONLY
-        use_template_only = bool(USE_TEMPLATE_MATCHING_ONLY)
-    except (ImportError, AttributeError):
-        pass
-    if use_template_only and arena_templates:
-        detector = None
-    else:
-        detector = arena_detector
-        if detector is None:
-            detector = _get_pyclashbot_arena_detector()
-        if detector is None:
-            detector = _get_roboflow_arena_detector()
-        if detector is None:
-            detector = _get_arena_detector()
-    if detector is not None:
-        use_full_frame = False
-        try:
-            from config.roboflow_arena_config import USE_FULL_FRAME as _uff
-            use_full_frame = bool(_uff)
-        except (ImportError, AttributeError):
-            pass
-        if use_full_frame:
-            # Many Roboflow models are trained on full screenshots; run on full frame then filter to arena
-            dets = detector.predict(screenshot, confidence_threshold=threshold)
-            results = []
-            for unit_id, conf, cx, cy in dets:
-                if px1 <= cx <= px2 and py1 <= cy <= py2:
-                    side = "left" if cx < arena_center_x else "right"
-                    results.append(ArenaUnitMatch(unit_id=unit_id, confidence=conf, center_x=int(cx), center_y=int(cy), side=side))
-        else:
-            dets = detector.predict(arena_crop, confidence_threshold=threshold)
-            results = []
-            for unit_id, conf, cx, cy in dets:
-                frame_cx = px1 + cx
-                frame_cy = py1 + cy
-                side = "left" if frame_cx < arena_center_x else "right"
-                results.append(ArenaUnitMatch(unit_id=unit_id, confidence=conf, center_x=frame_cx, center_y=frame_cy, side=side))
-        return results
-
-    # Fallback: template matching
-    if not arena_templates:
+    detector = arena_detector if arena_detector is not None else _get_arena_detector()
+    if detector is None:
         return []
-    if scales is None:
-        scales = [1.0]
-    found: list[tuple[str, float, int, int]] = []
-    for unit_id, template in arena_templates.items():
-        th, tw = template.shape[:2]
-        best_score = 0.0
-        best_cx, best_cy = 0, 0
-        for scale in scales:
-            if scale <= 0:
-                continue
-            tw_s = max(1, int(tw * scale))
-            th_s = max(1, int(th * scale))
-            if arena_crop.shape[0] < th_s or arena_crop.shape[1] < tw_s:
-                continue
-            tmpl = cv2.resize(template, (tw_s, th_s))
-            result = cv2.matchTemplate(arena_crop, tmpl, cv2.TM_CCOEFF_NORMED)
-            min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(result)
-            if max_val >= threshold and max_val > best_score:
-                best_score = float(max_val)
-                best_cx = px1 + max_loc[0] + tw_s // 2
-                best_cy = py1 + max_loc[1] + th_s // 2
-        if best_score >= threshold:
-            found.append((unit_id, best_score, best_cx, best_cy))
-    found.sort(key=lambda x: -x[1])
-    seen_centers: list[tuple[int, int]] = []
-    results = []
-    for unit_id, conf, cx, cy in found:
-        too_close = any(abs(cx - sx) < 30 and abs(cy - sy) < 30 for sx, sy in seen_centers)
-        if not too_close:
-            seen_centers.append((cx, cy))
-            side = "left" if cx < arena_center_x else "right"
-            results.append(ArenaUnitMatch(unit_id=unit_id, confidence=conf, center_x=cx, center_y=cy, side=side))
+
+    dets = detector.predict(arena_crop, confidence_threshold=threshold)
+    results: list[ArenaUnitMatch] = []
+    for unit_id, conf, cx, cy in dets:
+        frame_cx = px1 + cx
+        frame_cy = py1 + cy
+        side = "left" if frame_cx < arena_center_x else "right"
+        results.append(ArenaUnitMatch(unit_id=unit_id, confidence=conf, center_x=frame_cx, center_y=frame_cy, side=side))
     return results
 
 

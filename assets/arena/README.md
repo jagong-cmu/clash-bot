@@ -8,9 +8,12 @@ Use this folder to detect **troops and spells after they are placed in the arena
 
 - **Naming:** Same card/unit id as in `assets/cards/` so you can match them (e.g. `knight.png`, `fireball.png`).
 
-- **Content:** Screenshot or crop of the **troop or spell as it appears on the playable arena** — the character, building, or spell effect. One image per unit. Size can vary; the detector tries multiple scales.
+- **Multiple images per troop:** Put several reference images for one unit in a **subfolder** named after the unit. All images in that folder are used as templates for that troop.  
+  Example: `hog_rider/frame1.png`, `hog_rider/frame2.png`, `hog_rider/angle2.png` → all match as unit_id `hog_rider`. Use this for different angles, animation frames, or scales.
 
-- **Format:** PNG or JPG.
+- **Content:** Screenshot or crop of the **troop or spell as it appears on the playable arena** — the character, building, or spell effect. Size can vary (detector uses single-scale matching; add multiple sizes in a subfolder if needed).
+
+- **Format:** PNG, JPG, or WebP.
 
 ## How to get arena templates
 

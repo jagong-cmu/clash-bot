@@ -3,8 +3,8 @@ Arena detection using the same algorithm as py-clash-bot.
 
 Uses [py-clash-bot](https://github.com/pyclashbot/py-clash-bot)'s image_rec approach:
 grayscale template matching (cv2.matchTemplate, TM_CCOEFF_NORMED) over reference
-images in a folder. No ML model; one scale per template. Reference images live
-in assets/arena/ (or path from config).
+images. One image = one template; use a subfolder per troop to add multiple
+templates for the same unit (e.g. assets/arena/hog_rider/frame1.png, frame2.png).
 
 Based on: pyclashbot/detection/image_rec.py (find_references, compare_images).
 """
@@ -16,26 +16,52 @@ import cv2
 import numpy as np
 
 
+def _load_one_image(path: str) -> Optional[np.ndarray]:
+    """Load a single image (BGR). Supports png, jpg, webp."""
+    img = cv2.imread(path)
+    if img is None and path.lower().endswith(".webp"):
+        try:
+            from PIL import Image
+            pil_img = Image.open(path).convert("RGB")
+            img = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
+        except Exception:
+            pass
+    return img
+
+
 def _load_reference_images(folder: str) -> List[Tuple[str, np.ndarray]]:
-    """Load all .png/.jpg from folder. Return list of (base_name, BGR image)."""
+    """
+    Load reference images from folder. Returns list of (unit_id, BGR image).
+
+    - Top-level: hog_rider.png -> one template with unit_id "hog_rider".
+    - Subfolders: hog_rider/frame1.png, hog_rider/frame2.png -> multiple templates
+      all with unit_id "hog_rider". Use subfolders to add several images per troop.
+    """
     out: List[Tuple[str, np.ndarray]] = []
     if not os.path.isdir(folder):
         return out
+    exts = (".png", ".jpg", ".jpeg", ".webp")
+    # 1) Single images in the folder root: unit_id = filename without extension
     for name in sorted(os.listdir(folder)):
-        if not name.lower().endswith((".png", ".jpg", ".jpeg", ".webp")):
-            continue
         path = os.path.join(folder, name)
-        img = cv2.imread(path)
-        if img is None and name.lower().endswith(".webp"):
-            try:
-                from PIL import Image
-                pil_img = Image.open(path).convert("RGB")
-                img = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
-            except Exception:
-                continue
+        if not os.path.isfile(path) or not name.lower().endswith(exts):
+            continue
+        img = _load_one_image(path)
         if img is not None:
             base = os.path.splitext(name)[0]
             out.append((base, img))
+    # 2) Subfolders: unit_id = subfolder name, all images inside = templates for that unit
+    for name in sorted(os.listdir(folder)):
+        subdir = os.path.join(folder, name)
+        if not os.path.isdir(subdir) or name.startswith("."):
+            continue
+        for fname in sorted(os.listdir(subdir)):
+            if not fname.lower().endswith(exts):
+                continue
+            path = os.path.join(subdir, fname)
+            img = _load_one_image(path)
+            if img is not None:
+                out.append((name, img))
     return out
 
 
