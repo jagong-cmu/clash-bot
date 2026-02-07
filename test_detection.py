@@ -1,18 +1,15 @@
 """
 Test cards in hand only: capture the game window and print the 4 cards detected in hand.
 
-Uses the trained classifier by default; use --templates for template matching instead.
-
 Usage:
-  python test_detection.py              # classifier (no card assets needed)
-  python test_detection.py --templates  # template matching (needs assets/cards/)
-  python test_detection.py --loop 2     # run every 2s until Ctrl+C
-  python test_detection.py --audio      # optional audio match after capture
+  python test_detection.py                    # classifier (default)
+  python test_detection.py --save-slots dir/  # save slot crops to check/fix region
+  python test_detection.py --hand-top 0.75 --hand-bottom 0.97 --save-slots slots/  # tune region
+  python test_detection.py --templates        # use template matching instead
+  python test_detection.py --loop 2           # run every 2s until Ctrl+C
 
-Requires:
-  - Game window visible (iPhone Mirroring or set via --window).
-  - Classifier: torch, torchvision, and image detector/card_classifier.pth.
-  - Template fallback: assets/cards/ images.
+Slot region: edit config/hand_slots.py (HAND_TOP, HAND_BOTTOM, HAND_LEFT, HAND_RIGHT) so that
+--save-slots shows one card per image. Or pass --hand-top/--hand-bottom/--hand-left/--hand-right.
 """
 
 import sys
@@ -25,7 +22,15 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import cv2
 from src.coords import get_window_coordinates
 from src.capture import capture_screen_region
-from src.detection import load_card_templates, detect_cards_in_hand, DEFAULT_SLOT_REGIONS
+from src.detection import (
+    load_card_templates,
+    detect_cards_in_hand,
+    DEFAULT_SLOT_REGIONS,
+    HAND_TOP,
+    HAND_BOTTOM,
+    HAND_LEFT,
+    HAND_RIGHT,
+)
 from src.classifier import is_available as classifier_available, get_load_error as classifier_load_error
 
 # Paths relative to project root
@@ -42,8 +47,22 @@ def main():
     parser.add_argument("--templates", action="store_true", help="Use template matching for hand instead of classifier")
     parser.add_argument("--save", metavar="FILE", help="Save full captured frame to FILE (e.g. frame.png)")
     parser.add_argument("--save-slots", metavar="DIR", help="Save the 4 slot crops to DIR (slot_0.png .. slot_3.png) to check crop regions")
+    parser.add_argument("--hand-top", type=float, default=None, metavar="0-1", help="Hand region top (fraction of height). Tune until slots look right.")
+    parser.add_argument("--hand-bottom", type=float, default=None, metavar="0-1", help="Hand region bottom (fraction of height)")
+    parser.add_argument("--hand-left", type=float, default=None, metavar="0-1", help="Hand region left (fraction of width)")
+    parser.add_argument("--hand-right", type=float, default=None, metavar="0-1", help="Hand region right (fraction of width)")
     parser.add_argument("--loop", type=float, metavar="SEC", help="Run detection every SEC seconds until Ctrl+C (e.g. --loop 2)")
     args = parser.parse_args()
+
+    # Optional custom hand region (for tuning slot crops)
+    def get_slot_regions():
+        top = args.hand_top if args.hand_top is not None else HAND_TOP
+        bottom = args.hand_bottom if args.hand_bottom is not None else HAND_BOTTOM
+        left = args.hand_left if args.hand_left is not None else HAND_LEFT
+        right = args.hand_right if args.hand_right is not None else HAND_RIGHT
+        w = (right - left) / 4
+        return [(left + i * w, top, left + (i + 1) * w, bottom) for i in range(4)]
+    slot_regions = get_slot_regions()
 
     use_classifier = not args.templates
     if use_classifier:
@@ -105,16 +124,19 @@ def main():
             print(f"Saved frame to {args.save}")
             run_one_capture._saved = True
         if args.save_slots:
-            os.makedirs(args.save_slots, exist_ok=True)
+            save_dir = os.path.abspath(os.path.expanduser(args.save_slots))
+            os.makedirs(save_dir, exist_ok=True)
             h, w = screen.shape[:2]
-            for slot, (x1, y1, x2, y2) in enumerate(DEFAULT_SLOT_REGIONS):
+            for slot, (x1, y1, x2, y2) in enumerate(slot_regions):
                 px1, py1 = int(x1 * w), int(y1 * h)
                 px2, py2 = int(x2 * w), int(y2 * h)
                 crop = screen[py1:py2, px1:px2]
-                path = os.path.join(args.save_slots, f"slot_{slot}.png")
+                path = os.path.join(save_dir, f"slot_{slot}.png")
                 cv2.imwrite(path, crop)
             if not getattr(run_one_capture, "_slots_saved", False):
-                print(f"Saved slot crops to {args.save_slots}/")
+                print(f"Saved slot crops to {save_dir}/")
+                if any(getattr(args, a) is not None for a in ("hand_top", "hand_bottom", "hand_left", "hand_right")):
+                    print("  To save these bounds permanently, edit config/hand_slots.py with the same values.")
                 run_one_capture._slots_saved = True
         # Cards in hand (classifier or template matching)
         hand_matches = detect_cards_in_hand(
@@ -122,6 +144,7 @@ def main():
             templates=card_templates if not use_classifier else None,
             threshold=args.threshold,
             use_classifier=use_classifier,
+            slot_regions=slot_regions,
         )
         if hand_matches:
             print("Cards in hand:")
