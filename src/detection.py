@@ -23,6 +23,7 @@ except ImportError:
 
 # ——— Card slot layout (fractions of game frame width/height) ———
 # Clash Royale hand: 4 cards in a row at the bottom.
+# If crops are wrong (e.g. half arena), tune these; then run: python test_detection.py --save-slots slots/
 HAND_TOP    = 0.72
 HAND_BOTTOM = 0.98
 HAND_LEFT   = 0.05

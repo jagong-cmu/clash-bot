@@ -73,9 +73,10 @@ def main():
 
     train_tfms = transforms.Compose([
         transforms.Resize((IMG_SIZE, IMG_SIZE)),
-        transforms.RandomRotation(10),
-        transforms.RandomAffine(0, translate=(0.05, 0.05)),
-        transforms.ColorJitter(brightness=0.3, contrast=0.3),
+        transforms.RandomRotation(15),
+        transforms.RandomAffine(0, translate=(0.08, 0.08), scale=(0.92, 1.08)),
+        transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.2),
+        transforms.RandomHorizontalFlip(p=0.5),
         transforms.ToTensor(),
         transforms.Normalize(
             mean=[0.485, 0.456, 0.406],
