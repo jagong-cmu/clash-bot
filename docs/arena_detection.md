@@ -66,4 +66,29 @@ python test_arena_tracking.py
 python test_arena_tracking.py --loop 1.0 --threshold 0.5
 ```
 
-If a detector is loaded, you’ll see “Using arena object detector”. Otherwise “Using template matching” with templates from **assets/arena/**.
+If a detector is loaded, you’ll see “Using Roboflow Universe arena model" or "Using local arena detector". Otherwise "Using template matching" with templates from **assets/arena/**.
+
+---
+
+## Troubleshooting (terminal messages and accuracy)
+
+- **"Unknown resize method, defaulting to 'Stretch'"**  
+  This can hurt accuracy. Upgrade the inference package so the model's preprocessing is handled correctly. 1.0.x is still a pre-release, so use `--pre`:
+  ```bash
+  pip install --upgrade --pre inference
+  ```
+  Or install a specific version: `pip install inference==1.0.0rc1 --pre`. Use Python 3.9-3.12; 1.0.x supports the expected resize methods.
+
+- **"ModelDependencyMissing" (Qwen, SAM, Gaze, YoloWorld)**  
+  These are optional models not used for Clash Royale arena detection. The test script disables them to reduce noise. You can ignore or suppress via env vars (e.g. `CORE_MODEL_SAM_ENABLED=False`).
+
+- **"Specified provider 'CUDAExecutionProvider' is not in available provider names"**  
+  On Mac, CUDA is not available; CoreML or CPU is used instead. This is expected and not an error.
+
+- **Few troops detected or low accuracy**  
+  1. Upgrade inference (see above).  
+  2. Try a lower confidence threshold: `python test_arena_tracking.py --threshold 0.4`.  
+  3. Ensure the game window (or iPhone Mirroring) is clearly visible and not minimized.
+
+If a detector is loaded, you'll see "Using Roboflow Universe arena model" or "Using local arena detector". Otherwise "Using template matching" with templates from **assets/arena/**.
+

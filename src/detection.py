@@ -81,10 +81,19 @@ except (ImportError, AttributeError):
     pass
 
 # ——— Arena (playable battlefield) ———
+# Override from config/arena_slots.py if it exists (edit that file to adjust arena crop region).
 ARENA_TOP    = 0.12
 ARENA_BOTTOM = 0.70
 ARENA_LEFT   = 0.02
 ARENA_RIGHT  = 0.98
+try:
+    _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if _root not in sys.path:
+        sys.path.insert(0, _root)
+    from config.arena_slots import ARENA_TOP as _at, ARENA_BOTTOM as _ab, ARENA_LEFT as _al, ARENA_RIGHT as _ar
+    ARENA_TOP, ARENA_BOTTOM, ARENA_LEFT, ARENA_RIGHT = _at, _ab, _al, _ar
+except (ImportError, AttributeError):
+    pass
 
 # Build 4 slot regions (left to right)
 def _hand_slot_regions(custom_top=None, custom_bottom=None, custom_left=None, custom_right=None):
