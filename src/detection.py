@@ -9,6 +9,7 @@ Templates: assets/cards/ and assets/arena/ only needed for template-based fallba
 """
 
 import os
+import sys
 import cv2
 import numpy as np
 from dataclasses import dataclass
@@ -23,24 +24,33 @@ except ImportError:
 
 # ——— Card slot layout (fractions of game frame width/height) ———
 # Clash Royale hand: 4 cards in a row at the bottom.
-# If crops are wrong (e.g. half arena), tune these; then run: python test_detection.py --save-slots slots/
+# Override from config/hand_slots.py if it exists (edit that file to fix crop position).
 HAND_TOP    = 0.72
 HAND_BOTTOM = 0.98
 HAND_LEFT   = 0.05
 HAND_RIGHT  = 0.95
+try:
+    _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if _root not in sys.path:
+        sys.path.insert(0, _root)
+    from config.hand_slots import HAND_TOP as _t, HAND_BOTTOM as _b, HAND_LEFT as _l, HAND_RIGHT as _r
+    HAND_TOP, HAND_BOTTOM, HAND_LEFT, HAND_RIGHT = _t, _b, _l, _r
+except (ImportError, AttributeError):
+    pass
 
 # ——— Arena (playable battlefield) ———
-# Region where troops/spells appear after placement. Excludes hand and top UI.
 ARENA_TOP    = 0.12
 ARENA_BOTTOM = 0.70
 ARENA_LEFT   = 0.02
 ARENA_RIGHT  = 0.98
 
 # Build 4 slot regions (left to right)
-def _hand_slot_regions():
+def _hand_slot_regions(custom_top=None, custom_bottom=None, custom_left=None, custom_right=None):
     n = 4
-    top, bottom = HAND_TOP, HAND_BOTTOM
-    left, right = HAND_LEFT, HAND_RIGHT
+    top = custom_top if custom_top is not None else HAND_TOP
+    bottom = custom_bottom if custom_bottom is not None else HAND_BOTTOM
+    left = custom_left if custom_left is not None else HAND_LEFT
+    right = custom_right if custom_right is not None else HAND_RIGHT
     w = (right - left) / n
     return [
         (left + i * w, top, left + (i + 1) * w, bottom)
