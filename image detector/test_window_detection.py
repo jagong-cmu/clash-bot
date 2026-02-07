@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Simple test script for window detection function."""
+"""Simple test script for window detection function (same logic used by collect_card_data and the bot)."""
 import sys
 import os
 
-# Add src to path
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# Project root so "from src.coords import ..." works when run from image detector/ or project root
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, ROOT)
 
 from src.coords import get_window_coordinates, list_open_windows
 
