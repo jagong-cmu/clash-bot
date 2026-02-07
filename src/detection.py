@@ -1,12 +1,11 @@
 """
 Troop and spell detection for Clash Royale.
 
-- **In hand:** template matching in the 4 card slots (card art).
+- **In hand:** trained classifier (image detector/card_classifier.pth) by default; optional template-matching fallback.
 - **On arena:** template matching in the playable area (unit/spell sprites as they appear on the battlefield).
 
-External assets:
-- assets/cards/ — card art for hand detection (filename = card key). PNG, JPG, or WebP.
-- assets/arena/ — how each unit/spell looks ON THE BATTLEFIELD (sprite). PNG, JPG, or WebP.
+Classifier: MobileNetV2 trained on card icons (cards, spells, buildings). No template images needed for hand.
+Templates: assets/cards/ and assets/arena/ only needed for template-based fallback or arena detection.
 """
 
 import os
@@ -14,6 +13,12 @@ import cv2
 import numpy as np
 from dataclasses import dataclass
 from typing import Optional
+
+try:
+    from src.classifier import is_available as _classifier_available, predict_card as _predict_card
+except ImportError:
+    _classifier_available = lambda: False
+    _predict_card = None
 
 
 # ——— Card slot layout (fractions of game frame width/height) ———
@@ -146,31 +151,52 @@ def _match_in_region(
 
 def detect_cards_in_hand(
     screenshot: np.ndarray,
-    templates: dict[str, np.ndarray],
+    templates: Optional[dict[str, np.ndarray]] = None,
     threshold: float = 0.65,
     slot_regions: Optional[list[tuple[float, float, float, float]]] = None,
     scales: Optional[list[float]] = None,
+    use_classifier: bool = True,
 ) -> list[CardMatch]:
     """
-    Detect which card is in each hand slot using template matching.
-    Uses multi-scale matching to handle resolution mismatches.
+    Detect which card is in each hand slot.
+
+    By default uses the trained classifier (image detector/card_classifier.pth) so no
+    template images are needed. Set use_classifier=False and pass templates to use
+    template matching instead.
 
     Args:
         screenshot: Full game frame (BGR, from capture_screen_region).
-        templates: Dict of card_id -> template image (from load_card_templates).
-        threshold: Minimum match score to report a card (0.0–1.0).
-        slot_regions: List of (x1, y1, x2, y2) in normalized coords [0,1].
-                     Default: 4 slots at bottom of screen.
-        scales: Template scales to try (e.g. [0.55, 0.7, 1.0, 1.15]). None = default.
+        templates: Optional dict of card_id -> template (only used if use_classifier=False).
+        threshold: Minimum confidence to report a card (0.0–1.0).
+        slot_regions: List of (x1, y1, x2, y2) in normalized coords [0,1]. Default: 4 slots.
+        scales: Template scales when using template matching. None = default.
+        use_classifier: If True and classifier is available, use it; else use templates.
 
     Returns:
         List of CardMatch (slot, card_id, confidence), one per slot with match above threshold.
     """
-    if not templates:
-        return []
     regions = slot_regions or DEFAULT_SLOT_REGIONS
     h, w = screenshot.shape[:2]
-    results: list[CardMatch] = []
+
+    # Prefer trained classifier when requested and available
+    if use_classifier and _classifier_available() and _predict_card is not None:
+        results: list[CardMatch] = []
+        for slot, region in enumerate(regions):
+            x1, y1, x2, y2 = region
+            px1, py1 = int(x1 * w), int(y1 * h)
+            px2, py2 = int(x2 * w), int(y2 * h)
+            crop = screenshot[py1:py2, px1:px2]
+            if crop.size == 0:
+                continue
+            card_name, conf = _predict_card(crop)
+            if card_name != "unknown" and conf >= threshold:
+                results.append(CardMatch(slot=slot, card_id=card_name, confidence=conf))
+        return results
+
+    # Fallback: template matching
+    if not templates:
+        return []
+    results = []
     for slot, region in enumerate(regions):
         best_card: Optional[str] = None
         best_score = 0.0

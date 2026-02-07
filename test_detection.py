@@ -1,17 +1,19 @@
 """
 Test troop/spell detection: capture the game window and print:
-  - Cards in hand (from assets/cards/).
-  - Units on the arena / placed on the battlefield (from assets/arena/).
+  - Cards in hand (trained classifier by default; use --templates for template matching).
+  - Units on the arena (from assets/arena/ templates).
 Optionally run with --audio to record and match sound signatures.
 
 Usage:
-  python test_detection.py
+  python test_detection.py              # classifier for hand (no card assets needed)
+  python test_detection.py --templates  # template matching for hand (needs assets/cards/)
   python test_detection.py --audio
 
 Requires:
-  - Game window visible (name containing "iPhone Mirroring" or set via --window).
-  - assets/cards/ for in-hand detection; assets/arena/ for on-arena detection (see READMEs).
-  - For --audio: assets/sounds/ with WAVs and: pip install sounddevice numpy scipy
+  - Game window visible (iPhone Mirroring or set via --window).
+  - For classifier: torch, torchvision, and image detector/card_classifier.pth.
+  - For template fallback: assets/cards/. For arena: assets/arena/.
+  - For --audio: assets/sounds/ and pip install sounddevice numpy scipy
 """
 
 import sys
@@ -26,9 +28,11 @@ from src.coords import get_window_coordinates
 from src.capture import capture_screen_region
 from src.detection import (
     load_card_templates,
+    detect_cards_in_hand,
     detect_any_card_on_screen,
     get_best_match_scores,
 )
+from src.classifier import is_available as classifier_available, get_load_error as classifier_load_error
 
 # Paths relative to project root
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -41,17 +45,27 @@ def main():
     parser = argparse.ArgumentParser(description="Test card detection on Clash Royale window")
     parser.add_argument("--audio", action="store_true", help="Record and match audio after one frame")
     parser.add_argument("--window", default="iPhone Mirroring", help="Window name to capture")
-    parser.add_argument("--threshold", type=float, default=0.3, help="Image match threshold (0-1)")
+    parser.add_argument("--threshold", type=float, default=0.5, help="Confidence threshold for classifier / match threshold (0-1)")
+    parser.add_argument("--templates", action="store_true", help="Use template matching for hand instead of classifier")
     parser.add_argument("--save", metavar="FILE", help="Save captured frame to FILE (e.g. frame.png) to inspect what the bot sees")
     parser.add_argument("--loop", type=float, metavar="SEC", help="Run detection every SEC seconds until Ctrl+C (e.g. --loop 2)")
     args = parser.parse_args()
 
-    templates = load_card_templates(CARDS_DIR)
-    if not templates:
+    use_classifier = not args.templates
+    if use_classifier:
+        if classifier_available():
+            print("Using trained card classifier (image detector/card_classifier.pth) for hand detection.")
+        else:
+            print("Classifier not available:", classifier_load_error() or "unknown")
+            print("Falling back to template matching. Add card images to assets/cards/ or install torch/torchvision.")
+            use_classifier = False
+    card_templates = load_card_templates(CARDS_DIR) if not use_classifier else {}
+    if not use_classifier and not card_templates:
         print("No card templates found in", CARDS_DIR)
-        print("Add PNG/JPG images named by card (e.g. knight.png). See assets/cards/README.md")
+        print("Add PNG/JPG images named by card, or use classifier (install torch, ensure image detector/card_classifier.pth exists).")
         return 1
-    print(f"Loaded {len(templates)} card templates: {sorted(templates.keys())}")
+    if card_templates:
+        print(f"Loaded {len(card_templates)} card templates: {sorted(card_templates.keys())}")
 
     window_coords = get_window_coordinates(args.window)
     if not window_coords:
@@ -99,18 +113,23 @@ def main():
             cv2.imwrite(args.save, screen)
             print(f"Saved frame to {args.save}")
             run_one_capture._saved = True
-        # Card detection (full-screen search)
-        matches = detect_any_card_on_screen(screen, templates, threshold=args.threshold)
-        if not matches:
-            print("No cards detected on screen above threshold.")
-            best = get_best_match_scores(screen, templates)
-            for card_id, score, cx, cy in sorted(best, key=lambda x: -x[1]):
-                print(f"  Best: {card_id} - similarity: {score:.3f} at ({cx}, {cy})")
-            print("  → Try --threshold 0.25 or add templates. Use --save frame.png to inspect.")
+        # Cards in hand (classifier or template matching)
+        hand_matches = detect_cards_in_hand(
+            screen,
+            templates=card_templates if not use_classifier else None,
+            threshold=args.threshold,
+            use_classifier=use_classifier,
+        )
+        if hand_matches:
+            print("Cards in hand:")
+            for m in hand_matches:
+                print(f"  Slot {m.slot}: {m.card_id} ({m.confidence:.2f})")
         else:
-            print("Cards detected on screen:")
-            for card_id, conf, cx, cy in matches:
-                print(f"  {card_id} - similarity: {conf:.3f} at ({cx}, {cy})")
+            print("No cards in hand detected above threshold.")
+            if use_classifier:
+                print("  → Try lowering --threshold or check image detector/card_classifier.pth")
+            else:
+                print("  → Try --threshold 0.25 or add templates. Use --save frame.png to inspect.")
         # Arena detection (full-screen search for battlefield units)
         if arena_templates:
             arena_matches = detect_any_card_on_screen(
