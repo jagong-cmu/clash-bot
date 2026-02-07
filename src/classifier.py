@@ -8,6 +8,7 @@ Requires: torch, torchvision, Pillow. Model file: image detector/card_classifier
 from __future__ import annotations
 
 import os
+import sys
 from typing import Tuple, Optional, List
 
 # Lazy-loaded state
@@ -22,9 +23,21 @@ IMG_SIZE = 128
 
 
 def _get_model_path() -> str:
-    """Path to card_classifier.pth relative to project root."""
+    """Path to card_classifier.pth. Uses config if set, else default."""
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    return os.path.join(root, "image detector", "card_classifier.pth")
+    default = os.path.join(root, "image detector", "card_classifier.pth")
+    try:
+        if root not in sys.path:
+            sys.path.insert(0, root)
+        from config.classifier_config import MODEL_PATH
+        if MODEL_PATH is None or not str(MODEL_PATH).strip():
+            return default
+        path = str(MODEL_PATH).strip()
+        if not os.path.isabs(path):
+            path = os.path.join(root, path)
+        return path
+    except (ImportError, AttributeError):
+        return default
 
 
 def load_classifier(model_path: Optional[str] = None) -> bool:
