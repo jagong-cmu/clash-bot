@@ -12,6 +12,7 @@ Usage:
   python test_arena_tracking.py
   python test_arena_tracking.py --loop 1.0
   python test_arena_tracking.py --window "iPhone Mirroring"
+  python test_arena_tracking.py --save-troops troops_out --troop-crop-size 128
 """
 
 import sys
@@ -46,6 +47,8 @@ def main():
     parser.add_argument("--threshold", type=float, default=0.5, help="Confidence threshold (detector or templates)")
     parser.add_argument("--loop", type=float, metavar="SEC", default=0, help="Run every SEC seconds (0 = once)")
     parser.add_argument("--show-region", action="store_true", help="Visualize the arena region and save to arena_region.png")
+    parser.add_argument("--save-troops", metavar="DIR", help="Save detected troop crops to directory (organized by unit_id)")
+    parser.add_argument("--troop-crop-size", type=int, default=128, help="Size of square crop around each detected troop (default: 128)")
     args = parser.parse_args()
 
     arena_detector = _get_roboflow_arena_detector()
@@ -118,6 +121,15 @@ def main():
         print(f"To adjust, edit config/arena_slots.py")
         return 0
 
+    # Setup save directory if requested
+    save_dir = None
+    crop_size = args.troop_crop_size
+    if args.save_troops:
+        save_dir = os.path.abspath(os.path.expanduser(args.save_troops))
+        os.makedirs(save_dir, exist_ok=True)
+        print(f"Saving troop crops to: {save_dir}")
+        print(f"Crop size: {crop_size}x{crop_size} pixels")
+
     tracker = ArenaTracker(max_distance_px=60, max_frames_lost=10)
     if args.loop > 0:
         print(f"Tracking every {args.loop}s. Ctrl+C to stop.")
@@ -125,6 +137,9 @@ def main():
     else:
         print("Capturing once in 2s...")
         time.sleep(2)
+
+    # Counter for saved crops per unit
+    saved_counts = {}
 
     def run():
         screen = capture_screen_region(game_x, game_y, game_width, game_height)
@@ -141,6 +156,32 @@ def main():
             print("Tracked units (id, unit, side, position):")
             for t in tracks:
                 print(f"  [{t.track_id}] {t.unit_id} ({t.side}) at ({t.x}, {t.y}) conf={t.confidence:.2f}")
+                
+                # Save crop if requested
+                if save_dir:
+                    h, w = screen.shape[:2]
+                    half_size = crop_size // 2
+                    x1 = max(0, t.x - half_size)
+                    y1 = max(0, t.y - half_size)
+                    x2 = min(w, t.x + half_size)
+                    y2 = min(h, t.y + half_size)
+                    
+                    crop = screen[y1:y2, x1:x2]
+                    if crop.size > 0:
+                        # Resize to exact size if needed (padding if too small)
+                        if crop.shape[0] != crop_size or crop.shape[1] != crop_size:
+                            crop = cv2.resize(crop, (crop_size, crop_size))
+                        
+                        # Create subdirectory for this unit type
+                        unit_dir = os.path.join(save_dir, t.unit_id)
+                        os.makedirs(unit_dir, exist_ok=True)
+                        
+                        # Save with unique filename
+                        count = saved_counts.get(t.unit_id, 0) + 1
+                        saved_counts[t.unit_id] = count
+                        filename = f"{t.unit_id}_{count:04d}.png"
+                        path = os.path.join(unit_dir, filename)
+                        cv2.imwrite(path, crop)
         else:
             print("No units on arena this frame.")
         return screen
