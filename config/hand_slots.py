@@ -9,9 +9,9 @@ Default (if this file is missing or values are wrong): see src/detection.py
 """
 
 # Vertical range of the hand strip (top and bottom as fraction of frame height)
-HAND_TOP = 0.72
-HAND_BOTTOM = 0.98
+HAND_TOP = 0.40
+HAND_BOTTOM = 0.60
 
 # Horizontal range (left and right as fraction of frame width)
-HAND_LEFT = 0.05
-HAND_RIGHT = 0.95
+HAND_LEFT = 0.40
+HAND_RIGHT = 0.90
