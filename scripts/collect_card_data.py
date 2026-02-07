@@ -2,19 +2,20 @@
 """
 Collect card images from the game window for training the classifier.
 
-Uses the same window detection as test_window_detection (src.coords) and the same
-hand-slot regions as detection. Captures the game window, crops the 4 hand slots,
-and saves them under data/card_dataset/collect/<class_name>/ so you can later
-move images to train/ and val/ for train_card_classifier.py.
+You specify which slot (1–4, left to right) each card is in so labels are correct.
+Saves one crop per entry under data/card_dataset/collect/<class_name>/.
 
 Usage:
   python scripts/collect_card_data.py
   python scripts/collect_card_data.py --window "iPhone Mirroring"
 
-Commands at prompt:
-  <card_name>  - Save the current 4 slot crops as that class (e.g. knight, fireball).
-  list         - List all open windows (to find the right --window name).
-  quit         - Exit.
+At prompt:
+  <card_name> <slot>  - Save the crop from that slot only (e.g. knight 1, fireball 3).
+  <card_name>         - You'll be asked "Which slot (1-4)?"
+  list                - List open windows.
+  quit                - Exit.
+
+Slots: 1 = leftmost card, 4 = rightmost.
 """
 
 import sys
@@ -39,24 +40,24 @@ def _normalize_class_name(name: str) -> str:
     return name.strip().lower().replace(" ", "_") or "unknown"
 
 
-def save_slot_crops(screen, slot_regions, out_dir: str, prefix: str) -> int:
-    """Save one image per slot; return count saved."""
+def save_one_slot(screen, slot_regions, slot_1based: int, out_dir: str, class_name: str) -> bool:
+    """Save only the specified slot (1-4) as one image. Returns True if saved."""
+    if not 1 <= slot_1based <= 4:
+        return False
+    slot = slot_1based - 1  # 0-based index
     h, w = screen.shape[:2]
+    x1, y1, x2, y2 = slot_regions[slot]
+    px1, py1 = int(x1 * w), int(y1 * h)
+    px2, py2 = int(x2 * w), int(y2 * h)
+    crop = screen[py1:py2, px1:px2]
+    if crop.size == 0:
+        return False
     os.makedirs(out_dir, exist_ok=True)
-    count = 0
-    for slot, (x1, y1, x2, y2) in enumerate(slot_regions):
-        px1, py1 = int(x1 * w), int(y1 * h)
-        px2, py2 = int(x2 * w), int(y2 * h)
-        crop = screen[py1:py2, px1:px2]
-        if crop.size == 0:
-            continue
-        # Unique filename: prefix_slot_N.png (N = existing count in dir)
-        existing = [f for f in os.listdir(out_dir) if f.startswith(prefix) and f.endswith(".png")]
-        n = len(existing)
-        path = os.path.join(out_dir, f"{prefix}_slot{n:04d}.png")
-        cv2.imwrite(path, crop)
-        count += 1
-    return count
+    existing = [f for f in os.listdir(out_dir) if f.endswith(".png")]
+    n = len(existing)
+    path = os.path.join(out_dir, f"{class_name}_{n:04d}.png")
+    cv2.imwrite(path, crop)
+    return True
 
 
 def main():
@@ -64,11 +65,12 @@ def main():
     parser.add_argument("--window", default="iPhone Mirroring", help="Window name to capture (partial match)")
     args = parser.parse_args()
 
-    print("Card data collector (uses same window detection as test_window_detection)")
+    print("Card data collector (slot = which card position, 1=left .. 4=right)")
     print("=" * 60)
     print(f"Collect dir: {COLLECT_DIR}")
-    print("Type a card/class name to save current 4 slots under that class.")
-    print("Type 'list' to see open windows, 'quit' to exit.\n")
+    print("Enter:  <card_name> <slot>   e.g.  knight 1   fireball 3")
+    print("Or:     <card_name>          then you'll be asked which slot (1-4).")
+    print("        list / quit\n")
 
     coords = get_window_coordinates(args.window)
     if not coords:
@@ -77,7 +79,7 @@ def main():
         coords = None
 
     while True:
-        cmd = input("Class name to save (or 'list' / 'quit'): ").strip()
+        cmd = input("Card and slot (e.g. knight 1) or 'list'/'quit': ").strip()
         if not cmd:
             continue
         if cmd.lower() in ("quit", "exit", "q"):
@@ -94,6 +96,27 @@ def main():
             print()
             continue
 
+        parts = cmd.split()
+        if not parts:
+            continue
+        class_name = _normalize_class_name(parts[0])
+        slot_input = None
+        if len(parts) >= 2:
+            try:
+                slot_input = int(parts[1])
+            except ValueError:
+                pass
+        if slot_input is None or not (1 <= slot_input <= 4):
+            while True:
+                slot_str = input(f"  Which slot is '{class_name}' in? (1=left, 4=right): ").strip()
+                try:
+                    slot_input = int(slot_str)
+                    if 1 <= slot_input <= 4:
+                        break
+                except ValueError:
+                    pass
+                print("  Enter a number 1, 2, 3, or 4.")
+
         if not coords:
             coords = get_window_coordinates(args.window)
             if not coords:
@@ -104,10 +127,11 @@ def main():
         if screen is None or screen.size == 0:
             print("Capture failed.\n")
             continue
-        class_name = _normalize_class_name(cmd)
         out_dir = os.path.join(COLLECT_DIR, class_name)
-        n = save_slot_crops(screen, DEFAULT_SLOT_REGIONS, out_dir, class_name)
-        print(f"  Saved {n} crops to {out_dir}\n")
+        if save_one_slot(screen, DEFAULT_SLOT_REGIONS, slot_input, out_dir, class_name):
+            print(f"  Saved 1 image to {out_dir}\n")
+        else:
+            print("  Save failed.\n")
 
     return 0
 

@@ -8,7 +8,7 @@ Requires: torch, torchvision, Pillow. Model file: image detector/card_classifier
 from __future__ import annotations
 
 import os
-from typing import Tuple, Optional
+from typing import Tuple, Optional, List
 
 # Lazy-loaded state
 _model = None
@@ -126,3 +126,27 @@ def predict_card(bgr_img) -> Tuple[str, float]:
         return (name, conf.item())
     except Exception:
         return ("unknown", 0.0)
+
+
+def predict_card_topk(bgr_img, k: int = 3) -> List[Tuple[str, float]]:
+    """
+    Return top-k predictions (card_name, confidence) for debugging.
+    Use to see if the correct card appears in the top 2 or 3 when the top-1 is wrong.
+    """
+    global _model, _transform, _class_names, _device
+    if _model is None and not load_classifier():
+        return [("unknown", 0.0)]
+    try:
+        import numpy as np
+        from PIL import Image
+        import torch
+        rgb = bgr_img[:, :, ::-1]
+        pil_img = Image.fromarray(rgb)
+        x = _transform(pil_img).unsqueeze(0).to(_device)
+        with torch.no_grad():
+            logits = _model(x)
+            probs = torch.softmax(logits, dim=1).squeeze(0)
+        top_probs, top_idxs = torch.topk(probs, min(k, probs.size(0)))
+        return [(_class_names[i.item()], top_probs[j].item()) for j, i in enumerate(top_idxs)]
+    except Exception:
+        return [("unknown", 0.0)]
