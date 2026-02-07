@@ -31,7 +31,11 @@ from src.detection import (
     HAND_LEFT,
     HAND_RIGHT,
 )
-from src.classifier import is_available as classifier_available, get_load_error as classifier_load_error
+from src.classifier import (
+    is_available as classifier_available,
+    get_load_error as classifier_load_error,
+    predict_card_topk,
+)
 
 # Paths relative to project root
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -51,6 +55,7 @@ def main():
     parser.add_argument("--hand-bottom", type=float, default=None, metavar="0-1", help="Hand region bottom (fraction of height)")
     parser.add_argument("--hand-left", type=float, default=None, metavar="0-1", help="Hand region left (fraction of width)")
     parser.add_argument("--hand-right", type=float, default=None, metavar="0-1", help="Hand region right (fraction of width)")
+    parser.add_argument("--show-top", type=int, default=0, metavar="N", help="Show top N predictions per slot (e.g. 3) to debug wrong cards")
     parser.add_argument("--loop", type=float, metavar="SEC", help="Run detection every SEC seconds until Ctrl+C (e.g. --loop 2)")
     args = parser.parse_args()
 
@@ -156,6 +161,18 @@ def main():
                 print("  → Try lowering --threshold or check image detector/card_classifier.pth")
             else:
                 print("  → Try --threshold 0.25 or add templates. Use --save frame.png to inspect.")
+        if getattr(args, "show_top", 0) > 0 and use_classifier and classifier_available():
+            h, w = screen.shape[:2]
+            print("Top predictions per slot (for debugging wrong cards):")
+            for slot, (x1, y1, x2, y2) in enumerate(slot_regions):
+                px1, py1 = int(x1 * w), int(y1 * h)
+                px2, py2 = int(x2 * w), int(y2 * h)
+                crop = screen[py1:py2, px1:px2]
+                if crop.size == 0:
+                    continue
+                topk = predict_card_topk(crop, k=args.show_top)
+                parts = [f"{i+1}. {name} ({p:.2f})" for i, (name, p) in enumerate(topk)]
+                print(f"  Slot {slot}: " + "  |  ".join(parts))
         return screen
 
     screen = run_one_capture()

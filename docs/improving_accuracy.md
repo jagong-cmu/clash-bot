@@ -1,6 +1,6 @@
 # Improving in-hand card detection accuracy
 
-If the classifier is often wrong or misses cards, try these in order.
+If the classifier gives **wrong cards** or misses cards, try these in order.
 
 ---
 
@@ -23,7 +23,19 @@ Open `slots/slot_0.png` … `slot_3.png`. Each should show **one card face** wit
 
 ---
 
-## 2. Tune the confidence threshold
+## 2. See what the model is considering (--show-top)
+
+When the top prediction is wrong, the correct card might be #2 or #3. To check:
+
+```bash
+python test_detection.py --show-top 3
+```
+
+This prints the top 3 predictions per slot with confidence. If the right card often appears as #2 or #3, the model is confused and **retraining on your data** (step 4) will help.
+
+---
+
+## 3. Tune the confidence threshold
 
 - **Too many wrong cards** → raise the threshold, e.g. `--threshold 0.7`.
 - **Too many slots empty** → lower it, e.g. `--threshold 0.35`.
@@ -34,7 +46,9 @@ python test_detection.py --threshold 0.6
 
 ---
 
-## 3. Retrain on data from your setup
+## 4. Retrain on your own data (best fix for wrong cards)
+
+The current model was likely trained on different resolution or card art. Training on **your** game (e.g. iPhone Mirroring) usually fixes wrong-card issues.
 
 The current model may have been trained on different resolution or layout. Training on **your** game (e.g. iPhone Mirroring) usually helps a lot.
 
@@ -58,7 +72,7 @@ The script saves to `image detector/card_classifier.pth`; the bot and test scrip
 
 ---
 
-## 4. Improve training data quality
+## 5. Improve training data quality
 
 - **More images per card** – aim for at least ~50–100+ per class in `train/`.
 - **Balance classes** – avoid one card with 500 images and another with 10.
@@ -67,7 +81,7 @@ The script saves to `image detector/card_classifier.pth`; the bot and test scrip
 
 ---
 
-## 5. Train longer / slightly stronger augmentation
+## 6. Train longer / slightly stronger augmentation
 
 The trainer now uses a bit more augmentation (rotation, scale, color jitter, flip). You can also:
 
@@ -80,12 +94,11 @@ python "image detector/train_card_classifier.py" --epochs 50 --lr 5e-4
 
 ---
 
-## Quick checklist
+## Quick checklist (wrong or missing cards)
 
 | Step | Action |
 |------|--------|
-| 1 | Run `python test_detection.py --save-slots slots/` and check `slot_0.png`–`slot_3.png`. |
-| 2 | If crops are wrong, adjust `HAND_TOP`/`HAND_BOTTOM`/`HAND_LEFT`/`HAND_RIGHT` in `src/detection.py`. |
-| 3 | Try `--threshold 0.4` or `0.65` to reduce misses or false positives. |
-| 4 | Collect data with `scripts/collect_card_data.py`, run `prepare_dataset.py`, then retrain with `--epochs 40`. |
-| 5 | Add more images per card and retrain again if needed. |
+| 1 | Run `python test_detection.py --show-top 3` to see if the correct card is in the top 3. |
+| 2 | Try `--threshold 0.7` to only show high-confidence predictions (fewer wrong, maybe more misses). |
+| 3 | **Retrain on your game:** run `scripts/collect_card_data.py`, then `scripts/prepare_dataset.py`, then `python "image detector/train_card_classifier.py" --epochs 40`. |
+| 4 | Use 50–100+ images per card and similar counts across cards for best accuracy. |
