@@ -1,19 +1,18 @@
 """
-Test troop/spell detection: capture the game window and print:
-  - Cards in hand (trained classifier by default; use --templates for template matching).
-  - Units on the arena (from assets/arena/ templates).
-Optionally run with --audio to record and match sound signatures.
+Test cards in hand only: capture the game window and print the 4 cards detected in hand.
+
+Uses the trained classifier by default; use --templates for template matching instead.
 
 Usage:
-  python test_detection.py              # classifier for hand (no card assets needed)
-  python test_detection.py --templates  # template matching for hand (needs assets/cards/)
-  python test_detection.py --audio
+  python test_detection.py              # classifier (no card assets needed)
+  python test_detection.py --templates  # template matching (needs assets/cards/)
+  python test_detection.py --loop 2     # run every 2s until Ctrl+C
+  python test_detection.py --audio      # optional audio match after capture
 
 Requires:
   - Game window visible (iPhone Mirroring or set via --window).
-  - For classifier: torch, torchvision, and image detector/card_classifier.pth.
-  - For template fallback: assets/cards/. For arena: assets/arena/.
-  - For --audio: assets/sounds/ and pip install sounddevice numpy scipy
+  - Classifier: torch, torchvision, and image detector/card_classifier.pth.
+  - Template fallback: assets/cards/ images.
 """
 
 import sys
@@ -26,23 +25,17 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import cv2
 from src.coords import get_window_coordinates
 from src.capture import capture_screen_region
-from src.detection import (
-    load_card_templates,
-    detect_cards_in_hand,
-    detect_any_card_on_screen,
-    get_best_match_scores,
-)
+from src.detection import load_card_templates, detect_cards_in_hand
 from src.classifier import is_available as classifier_available, get_load_error as classifier_load_error
 
 # Paths relative to project root
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 CARDS_DIR = os.path.join(PROJECT_ROOT, "assets", "cards")
-ARENA_DIR = os.path.join(PROJECT_ROOT, "assets", "arena")
 SOUNDS_DIR = os.path.join(PROJECT_ROOT, "assets", "sounds")
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Test card detection on Clash Royale window")
+    parser = argparse.ArgumentParser(description="Test cards in hand (no arena detection)")
     parser.add_argument("--audio", action="store_true", help="Record and match audio after one frame")
     parser.add_argument("--window", default="iPhone Mirroring", help="Window name to capture")
     parser.add_argument("--threshold", type=float, default=0.5, help="Confidence threshold for classifier / match threshold (0-1)")
@@ -93,9 +86,6 @@ def main():
         except ImportError as e:
             print("Audio deps missing (pip install sounddevice numpy scipy); skipping audio:", e)
 
-    arena_templates = load_card_templates(ARENA_DIR)
-    if arena_templates:
-        print(f"Loaded {len(arena_templates)} arena templates: {sorted(arena_templates.keys())}")
     if args.loop and args.loop > 0:
         print(f"Looping every {args.loop}s. Focus the game window; press Ctrl+C to stop.")
         time.sleep(2)
@@ -130,20 +120,6 @@ def main():
                 print("  → Try lowering --threshold or check image detector/card_classifier.pth")
             else:
                 print("  → Try --threshold 0.25 or add templates. Use --save frame.png to inspect.")
-        # Arena detection (full-screen search for battlefield units)
-        if arena_templates:
-            arena_matches = detect_any_card_on_screen(
-                screen, arena_templates, threshold=args.threshold
-            )
-            if arena_matches:
-                print("Units on arena (battlefield):")
-                for unit_id, conf, cx, cy in arena_matches:
-                    print(f"  {unit_id} - similarity: {conf:.3f} at ({cx}, {cy})")
-            else:
-                print("No units on arena detected.")
-                best = get_best_match_scores(screen, arena_templates)
-                for unit_id, score, cx, cy in sorted(best, key=lambda x: -x[1]):
-                    print(f"  Best: {unit_id} - similarity: {score:.3f} at ({cx}, {cy})")
         return screen
 
     screen = run_one_capture()
