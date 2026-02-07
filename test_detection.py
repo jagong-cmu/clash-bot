@@ -6,7 +6,6 @@ Optionally run with --audio to record and match sound signatures.
 
 Usage:
   python test_detection.py
-  python test_detection.py --arena     # also detect units on the battlefield
   python test_detection.py --audio
 
 Requires:
@@ -27,10 +26,8 @@ from src.coords import get_window_coordinates
 from src.capture import capture_screen_region
 from src.detection import (
     load_card_templates,
-    detect_cards_in_hand,
-    detect_units_on_arena,
-    CardMatch,
-    ArenaUnitMatch,
+    detect_any_card_on_screen,
+    get_best_match_scores,
 )
 
 # Paths relative to project root
@@ -43,9 +40,8 @@ SOUNDS_DIR = os.path.join(PROJECT_ROOT, "assets", "sounds")
 def main():
     parser = argparse.ArgumentParser(description="Test card detection on Clash Royale window")
     parser.add_argument("--audio", action="store_true", help="Record and match audio after one frame")
-    parser.add_argument("--arena", action="store_true", help="Also detect units on the arena (placed troops/spells)")
     parser.add_argument("--window", default="iPhone Mirroring", help="Window name to capture")
-    parser.add_argument("--threshold", type=float, default=0.75, help="Image match threshold (0-1)")
+    parser.add_argument("--threshold", type=float, default=0.3, help="Image match threshold (0-1)")
     parser.add_argument("--save", metavar="FILE", help="Save captured frame to FILE (e.g. frame.png) to inspect what the bot sees")
     parser.add_argument("--loop", type=float, metavar="SEC", help="Run detection every SEC seconds until Ctrl+C (e.g. --loop 2)")
     args = parser.parse_args()
@@ -83,7 +79,9 @@ def main():
         except ImportError as e:
             print("Audio deps missing (pip install sounddevice numpy scipy); skipping audio:", e)
 
-    arena_templates = load_card_templates(ARENA_DIR) if args.arena else {}
+    arena_templates = load_card_templates(ARENA_DIR)
+    if arena_templates:
+        print(f"Loaded {len(arena_templates)} arena templates: {sorted(arena_templates.keys())}")
     if args.loop and args.loop > 0:
         print(f"Looping every {args.loop}s. Focus the game window; press Ctrl+C to stop.")
         time.sleep(2)
@@ -101,25 +99,32 @@ def main():
             cv2.imwrite(args.save, screen)
             print(f"Saved frame to {args.save}")
             run_one_capture._saved = True
-        # In-hand detection
-        matches: list[CardMatch] = detect_cards_in_hand(screen, templates, threshold=args.threshold)
+        # Card detection (full-screen search)
+        matches = detect_any_card_on_screen(screen, templates, threshold=args.threshold)
         if not matches:
-            print("No cards in hand detected above threshold. Try lowering --threshold or adding templates to assets/cards/.")
+            print("No cards detected on screen above threshold.")
+            best = get_best_match_scores(screen, templates)
+            for card_id, score, cx, cy in sorted(best, key=lambda x: -x[1]):
+                print(f"  Best: {card_id} - similarity: {score:.3f} at ({cx}, {cy})")
+            print("  → Try --threshold 0.25 or add templates. Use --save frame.png to inspect.")
         else:
-            print("Cards in hand:")
-            for m in matches:
-                print(f"  Slot {m.slot}: {m.card_id} ({m.confidence:.2f})")
-        # Arena detection
+            print("Cards detected on screen:")
+            for card_id, conf, cx, cy in matches:
+                print(f"  {card_id} - similarity: {conf:.3f} at ({cx}, {cy})")
+        # Arena detection (full-screen search for battlefield units)
         if arena_templates:
-            arena_matches: list[ArenaUnitMatch] = detect_units_on_arena(
-                screen, arena_templates, threshold=args.threshold, scales=[0.7, 1.0, 1.3]
+            arena_matches = detect_any_card_on_screen(
+                screen, arena_templates, threshold=args.threshold
             )
             if arena_matches:
-                print("Units on arena:")
-                for m in arena_matches:
-                    print(f"  {m.unit_id} at ({m.center_x}, {m.center_y}) conf={m.confidence:.2f}")
+                print("Units on arena (battlefield):")
+                for unit_id, conf, cx, cy in arena_matches:
+                    print(f"  {unit_id} - similarity: {conf:.3f} at ({cx}, {cy})")
             else:
                 print("No units on arena detected.")
+                best = get_best_match_scores(screen, arena_templates)
+                for unit_id, score, cx, cy in sorted(best, key=lambda x: -x[1]):
+                    print(f"  Best: {unit_id} - similarity: {score:.3f} at ({cx}, {cy})")
         return screen
 
     screen = run_one_capture()

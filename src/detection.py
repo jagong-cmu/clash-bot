@@ -86,6 +86,13 @@ def load_card_templates(
             continue
         path = os.path.join(templates_dir, name)
         img = cv2.imread(path)
+        if img is None and ext.lower() == ".webp":
+            try:
+                from PIL import Image
+                pil_img = Image.open(path).convert("RGB")
+                img = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
+            except (ImportError, OSError):
+                pass
         if img is not None:
             out[base] = img
     return out
@@ -98,10 +105,11 @@ def _match_in_region(
     template: np.ndarray,
     region: tuple[float, float, float, float],
     method: int = cv2.TM_CCOEFF_NORMED,
+    scales: Optional[list[float]] = None,
 ) -> float:
-    """Run template match in a normalized region; return best score."""
+    """Run template match in a normalized region; return best score.
+    Tries multiple scales to handle resolution mismatches between template and screen."""
     x1, y1, x2, y2 = region
-    # Pixel bounds
     px1 = int(x1 * frame_w)
     py1 = int(y1 * frame_h)
     px2 = int(x2 * frame_w)
@@ -109,33 +117,43 @@ def _match_in_region(
     crop = frame[py1:py2, px1:px2]
     if crop.size == 0:
         return 0.0
+    crop_h, crop_w = crop.shape[:2]
     th, tw = template.shape[:2]
-    if crop.shape[0] < th or crop.shape[1] < tw:
-        # Scale template down to fit
-        scale = min(crop.shape[0] / th, crop.shape[1] / tw)
-        new_w = max(1, int(tw * scale))
-        new_h = max(1, int(th * scale))
+    if scales is None:
+        scales = [0.55, 0.7, 0.85, 1.0, 1.15]
+    best_val = 0.0
+    for s in scales:
+        if s <= 0:
+            continue
+        new_w = max(1, int(tw * s))
+        new_h = max(1, int(th * s))
+        if new_h > crop_h or new_w > crop_w:
+            continue
         template_scaled = cv2.resize(template, (new_w, new_h))
         result = cv2.matchTemplate(crop, template_scaled, method)
-    else:
-        result = cv2.matchTemplate(crop, template, method)
-    if result.size == 0:
-        return 0.0
-    if method in (cv2.TM_SQDIFF_NORMED, cv2.TM_SQDIFF):
-        _, min_val, _, _ = cv2.minMaxLoc(result)
-        return 1.0 - min_val  # convert to "higher is better"
-    _, max_val, _, _ = cv2.minMaxLoc(result)
-    return float(max_val)
+        if result.size == 0:
+            continue
+        if method in (cv2.TM_SQDIFF_NORMED, cv2.TM_SQDIFF):
+            _, min_val, _, _ = cv2.minMaxLoc(result)
+            val = 1.0 - min_val
+        else:
+            _, max_val, _, _ = cv2.minMaxLoc(result)
+            val = float(max_val)
+        if val > best_val:
+            best_val = val
+    return best_val
 
 
 def detect_cards_in_hand(
     screenshot: np.ndarray,
     templates: dict[str, np.ndarray],
-    threshold: float = 0.75,
+    threshold: float = 0.65,
     slot_regions: Optional[list[tuple[float, float, float, float]]] = None,
+    scales: Optional[list[float]] = None,
 ) -> list[CardMatch]:
     """
     Detect which card is in each hand slot using template matching.
+    Uses multi-scale matching to handle resolution mismatches.
 
     Args:
         screenshot: Full game frame (BGR, from capture_screen_region).
@@ -143,6 +161,7 @@ def detect_cards_in_hand(
         threshold: Minimum match score to report a card (0.0–1.0).
         slot_regions: List of (x1, y1, x2, y2) in normalized coords [0,1].
                      Default: 4 slots at bottom of screen.
+        scales: Template scales to try (e.g. [0.55, 0.7, 1.0, 1.15]). None = default.
 
     Returns:
         List of CardMatch (slot, card_id, confidence), one per slot with match above threshold.
@@ -156,13 +175,39 @@ def detect_cards_in_hand(
         best_card: Optional[str] = None
         best_score = 0.0
         for card_id, template in templates.items():
-            score = _match_in_region(screenshot, h, w, template, region)
+            score = _match_in_region(screenshot, h, w, template, region, scales=scales)
             if score > best_score:
                 best_score = score
                 best_card = card_id
         if best_card is not None and best_score >= threshold:
             results.append(CardMatch(slot=slot, card_id=best_card, confidence=best_score))
     return results
+
+
+def get_slot_best_matches(
+    screenshot: np.ndarray,
+    templates: dict[str, np.ndarray],
+    slot_regions: Optional[list[tuple[float, float, float, float]]] = None,
+) -> list[tuple[int, Optional[str], float]]:
+    """
+    Return the best card match for each slot, regardless of threshold.
+    Useful for debugging: (slot, card_id, score) per slot.
+    """
+    if not templates:
+        return []
+    regions = slot_regions or DEFAULT_SLOT_REGIONS
+    h, w = screenshot.shape[:2]
+    out: list[tuple[int, Optional[str], float]] = []
+    for slot, region in enumerate(regions):
+        best_card: Optional[str] = None
+        best_score = 0.0
+        for card_id, template in templates.items():
+            score = _match_in_region(screenshot, h, w, template, region)
+            if score > best_score:
+                best_score = score
+                best_card = card_id
+        out.append((slot, best_card, best_score))
+    return out
 
 
 def get_arena_region() -> tuple[float, float, float, float]:
@@ -235,30 +280,92 @@ def detect_units_on_arena(
     return results
 
 
+def _template_match_best(
+    screenshot: np.ndarray,
+    template: np.ndarray,
+    scales: list[float],
+    use_grayscale: bool = False,
+) -> tuple[float, int, int]:
+    """Run multi-scale template matching; return (best_score, center_x, center_y)."""
+    h, w = screenshot.shape[:2]
+    frame = cv2.cvtColor(screenshot, cv2.COLOR_BGR2GRAY) if use_grayscale else screenshot
+    tmpl_base = cv2.cvtColor(template, cv2.COLOR_BGR2GRAY) if use_grayscale else template
+    best_score = 0.0
+    best_cx, best_cy = 0, 0
+    th, tw = tmpl_base.shape[:2]
+    for s in scales:
+        if s <= 0:
+            continue
+        tw_s = max(1, int(tw * s))
+        th_s = max(1, int(th * s))
+        if h < th_s or w < tw_s:
+            continue
+        tmpl = cv2.resize(tmpl_base, (tw_s, th_s))
+        result = cv2.matchTemplate(frame, tmpl, cv2.TM_CCOEFF_NORMED)
+        _, max_val, _, max_loc = cv2.minMaxLoc(result)
+        if max_val > best_score:
+            best_score = float(max_val)
+            best_cx = max_loc[0] + tw_s // 2
+            best_cy = max_loc[1] + th_s // 2
+    return best_score, best_cx, best_cy
+
+
+def get_best_match_scores(
+    screenshot: np.ndarray,
+    templates: dict[str, np.ndarray],
+    scales: Optional[list[float]] = None,
+) -> list[tuple[str, float, int, int]]:
+    """
+    Return best match per template regardless of threshold (for debugging).
+    Returns list of (card_id, score, cx, cy).
+    """
+    if not templates:
+        return []
+    if scales is None:
+        scales = [0.3, 0.4, 0.5, 0.65, 0.8, 1.0, 1.2, 1.4]
+    out: list[tuple[str, float, int, int]] = []
+    for card_id, template in templates.items():
+        score_c, cx_c, cy_c = _template_match_best(screenshot, template, scales, use_grayscale=False)
+        score_g, cx_g, cy_g = _template_match_best(screenshot, template, scales, use_grayscale=True)
+        if score_g > score_c:
+            out.append((card_id, score_g, cx_g, cy_g))
+        else:
+            out.append((card_id, score_c, cx_c, cy_c))
+    return out
+
+
 def detect_any_card_on_screen(
     screenshot: np.ndarray,
     templates: dict[str, np.ndarray],
-    threshold: float = 0.8,
+    threshold: float = 0.3,
+    scales: Optional[list[float]] = None,
+    use_grayscale: bool = True,
 ) -> list[tuple[str, float, int, int]]:
     """
-    Search the entire frame for any card template (e.g. for battlefield or UI).
-    Slower than slot-based detection; use for occasional full-screen checks.
+    Search the entire frame for any card template. Matches anywhere on screen.
+    Uses multi-scale matching and optional grayscale for robustness.
 
     Returns:
         List of (card_id, confidence, center_x, center_y) in frame coordinates.
     """
     if not templates:
         return []
-    h, w = screenshot.shape[:2]
-    found = []
+    if scales is None:
+        scales = [0.3, 0.4, 0.5, 0.65, 0.8, 1.0, 1.2, 1.4]
+    found: list[tuple[str, float, int, int]] = []
     for card_id, template in templates.items():
-        th, tw = template.shape[:2]
-        if h < th or w < tw:
-            continue
-        result = cv2.matchTemplate(screenshot, template, cv2.TM_CCOEFF_NORMED)
-        min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(result)
-        if max_val >= threshold:
-            cx = max_loc[0] + tw // 2
-            cy = max_loc[1] + th // 2
-            found.append((card_id, float(max_val), cx, cy))
-    return found
+        score_c, cx_c, cy_c = _template_match_best(screenshot, template, scales, use_grayscale=False)
+        score_g, cx_g, cy_g = _template_match_best(screenshot, template, scales, use_grayscale=True)
+        best_score = max(score_c, score_g)
+        best_cx, best_cy = (cx_g, cy_g) if score_g >= score_c else (cx_c, cy_c)
+        if best_score >= threshold:
+            found.append((card_id, best_score, best_cx, best_cy))
+    found.sort(key=lambda x: -x[1])
+    seen: list[tuple[int, int]] = []
+    results: list[tuple[str, float, int, int]] = []
+    for card_id, conf, cx, cy in found:
+        too_close = any(abs(cx - sx) < 50 and abs(cy - sy) < 50 for sx, sy in seen)
+        if not too_close:
+            seen.append((cx, cy))
+            results.append((card_id, conf, cx, cy))
+    return results
