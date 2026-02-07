@@ -31,14 +31,29 @@ from tqdm import tqdm
 
 
 def _find_annotations(data_dir: str):
-    """Locate annotations.json (either in data_dir or data_dir/train and data_dir/val)."""
-    single = os.path.join(data_dir, "annotations.json")
-    if os.path.isfile(single):
-        return single, None
-    train_a = os.path.join(data_dir, "train", "annotations.json")
-    val_a = os.path.join(data_dir, "val", "annotations.json")
-    if os.path.isfile(train_a):
-        return train_a, val_a if os.path.isfile(val_a) else None
+    """Locate annotations (annotations.json or _annotations.coco.json in data_dir or data_dir/train)."""
+    for name in ("annotations.json", "_annotations.coco.json"):
+        single = os.path.join(data_dir, name)
+        if os.path.isfile(single):
+            return single, None
+    for name in ("annotations.json", "_annotations.coco.json"):
+        train_a = os.path.join(data_dir, "train", name)
+        val_a = os.path.join(data_dir, "val", name)
+        if os.path.isfile(train_a):
+            return train_a, val_a if os.path.isfile(val_a) else None
+    # Roboflow export: data_dir may contain "Project.v1i.coco" with train/ and valid/ inside
+    for sub in os.listdir(data_dir):
+        subdir = os.path.join(data_dir, sub)
+        if not os.path.isdir(subdir):
+            continue
+        for name in ("annotations.json", "_annotations.coco.json"):
+            train_a = os.path.join(subdir, "train", name)
+            if os.path.isfile(train_a):
+                for val_folder, val_name in [("valid", "_annotations.coco.json"), ("val", "annotations.json"), ("val", "_annotations.coco.json")]:
+                    val_a = os.path.join(subdir, val_folder, val_name)
+                    if os.path.isfile(val_a):
+                        return train_a, val_a
+                return train_a, None
     return None, None
 
 
@@ -54,7 +69,14 @@ class ArenaDetectionDataset(Dataset):
         self.categories = {c["id"]: c["name"] for c in data["categories"]}
         self.cat_ids = sorted(self.categories.keys())
         self.id_to_idx = {cid: i for i, cid in enumerate(self.cat_ids)}
-        self.img_dir = images_dir or os.path.join(os.path.dirname(annotations_path), "images")
+        base = os.path.dirname(annotations_path)
+        if images_dir:
+            self.img_dir = images_dir
+        else:
+            # Prefer images in same folder as JSON (Roboflow); else images/ subfolder
+            first_fn = self.img_list[0]["file_name"] if self.img_list else ""
+            same_dir = os.path.join(base, first_fn)
+            self.img_dir = base if first_fn and os.path.isfile(same_dir) else os.path.join(base, "images")
         self.transform = transform
 
     def __len__(self):
