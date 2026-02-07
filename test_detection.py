@@ -2,11 +2,11 @@
 Test cards in hand only: capture the game window and print the 4 cards detected in hand.
 
 Usage:
-  python test_detection.py                    # classifier (default)
+  python test_detection.py                    # loops every 1s (default)
+  python test_detection.py --loop 0           # run once
+  python test_detection.py --loop 2           # run every 2s
   python test_detection.py --save-slots dir/  # save slot crops to check/fix region
-  python test_detection.py --hand-top 0.75 --hand-bottom 0.97 --save-slots slots/  # tune region
   python test_detection.py --templates        # use template matching instead
-  python test_detection.py --loop 2           # run every 2s until Ctrl+C
 
 Slot region: edit config/hand_slots.py (HAND_TOP, HAND_BOTTOM, HAND_LEFT, HAND_RIGHT) so that
 --save-slots shows one card per image. Or pass --hand-top/--hand-bottom/--hand-left/--hand-right.
@@ -47,7 +47,7 @@ def main():
     parser = argparse.ArgumentParser(description="Test cards in hand (no arena detection)")
     parser.add_argument("--audio", action="store_true", help="Record and match audio after one frame")
     parser.add_argument("--window", default="iPhone Mirroring", help="Window name to capture")
-    parser.add_argument("--threshold", type=float, default=0.5, help="Confidence threshold for classifier / match threshold (0-1)")
+    parser.add_argument("--threshold", type=float, default=0.3, help="Confidence threshold for template matching (0-1). Classifier reports all 4 slots.")
     parser.add_argument("--templates", action="store_true", help="Use template matching for hand instead of classifier")
     parser.add_argument("--save", metavar="FILE", help="Save full captured frame to FILE (e.g. frame.png)")
     parser.add_argument("--save-slots", metavar="DIR", help="Save the 4 slot crops to DIR (slot_0.png .. slot_3.png) to check crop regions")
@@ -56,7 +56,7 @@ def main():
     parser.add_argument("--hand-left", type=float, default=None, metavar="0-1", help="Hand region left (fraction of width)")
     parser.add_argument("--hand-right", type=float, default=None, metavar="0-1", help="Hand region right (fraction of width)")
     parser.add_argument("--show-top", type=int, default=0, metavar="N", help="Show top N predictions per slot (e.g. 3) to debug wrong cards")
-    parser.add_argument("--loop", type=float, metavar="SEC", help="Run detection every SEC seconds until Ctrl+C (e.g. --loop 2)")
+    parser.add_argument("--loop", type=float, default=1, metavar="SEC", help="Run detection every SEC seconds until Ctrl+C (default: 1). Use --loop 0 to run once.")
     args = parser.parse_args()
 
     # Optional custom hand region (for tuning slot crops)
@@ -111,7 +111,7 @@ def main():
         except ImportError as e:
             print("Audio deps missing (pip install sounddevice numpy scipy); skipping audio:", e)
 
-    if args.loop and args.loop > 0:
+    if args.loop > 0:
         print(f"Looping every {args.loop}s. Focus the game window; press Ctrl+C to stop.")
         time.sleep(2)
         loop_interval = args.loop

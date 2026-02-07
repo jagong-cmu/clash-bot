@@ -200,7 +200,7 @@ def detect_cards_in_hand(
             if crop.size == 0:
                 continue
             card_name, conf = _predict_card(crop)
-            if card_name != "unknown" and conf >= threshold:
+            if card_name != "unknown":
                 results.append(CardMatch(slot=slot, card_id=card_name, confidence=conf))
         return results
 

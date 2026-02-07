@@ -8,6 +8,9 @@ scripts/collect_card_data.py, then organize into train/ and val/ subfolders by c
 Usage:
   python "image detector/train_card_classifier.py"
   python "image detector/train_card_classifier.py" --epochs 30 --batch-size 16
+  python "image detector/train_card_classifier.py" --fresh   # start fresh, ignore existing model
+
+By default, resumes from card_classifier.pth if it exists (adds to training).
 
 Data layout (ImageFolder):
   data/card_dataset/
@@ -51,6 +54,7 @@ def main():
     parser = argparse.ArgumentParser(description="Train card classifier for Clash Royale detection")
     parser.add_argument("--data-dir", default=DATA_DIR, help="Dataset root (contains train/ and val/)")
     parser.add_argument("--model-out", default=MODEL_OUT, help="Output .pth path")
+    parser.add_argument("--fresh", action="store_true", help="Start fresh (ignore existing model)")
     parser.add_argument("--epochs", type=int, default=EPOCHS)
     parser.add_argument("--batch-size", type=int, default=BATCH_SIZE)
     parser.add_argument("--lr", type=float, default=LEARNING_RATE)
@@ -106,10 +110,27 @@ def main():
     model.classifier[1] = nn.Linear(model.last_channel, num_classes)
     model = model.to(device)
 
+    best_val_acc = 0.0
+    if os.path.isfile(args.model_out) and not args.fresh:
+        checkpoint = torch.load(args.model_out, map_location=device)
+        old_classes = checkpoint.get("classes", [])
+        if set(old_classes) == set(train_ds.classes):
+            model.load_state_dict(checkpoint["model_state"], strict=True)
+            print("✅ Resumed from existing model (same classes)")
+        else:
+            state = checkpoint["model_state"]
+            backbone_state = {k: v for k, v in state.items() if not k.startswith("classifier")}
+            model.load_state_dict(backbone_state, strict=False)
+            model.classifier[1] = nn.Linear(model.last_channel, num_classes).to(device)
+            print(f"✅ Resumed backbone; classifier rebuilt for {num_classes} classes (was {len(old_classes)})")
+    else:
+        if args.fresh:
+            print("Starting fresh (--fresh flag)")
+        else:
+            print("No existing model found, starting from ImageNet pretrained")
+
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.classifier.parameters(), lr=args.lr)
-
-    best_val_acc = 0.0
     os.makedirs(os.path.dirname(args.model_out), exist_ok=True)
 
     for epoch in range(args.epochs):
