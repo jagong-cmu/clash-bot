@@ -2,10 +2,8 @@
 Troop and spell detection for Clash Royale.
 
 - **In hand:** trained classifier (image detector/card_classifier.pth) by default; optional template-matching fallback.
-- **On arena:** template matching in the playable area (unit/spell sprites as they appear on the battlefield).
-
-Classifier: MobileNetV2 trained on card icons (cards, spells, buildings). No template images needed for hand.
-Templates: assets/cards/ and assets/arena/ only needed for template-based fallback or arena detection.
+- **On arena:** 1) Roboflow Universe model (if configured), 2) local RetinaNet (arena_detector.pth), 3) template
+  matching (assets/arena/).
 """
 
 import os
@@ -13,13 +11,57 @@ import sys
 import cv2
 import numpy as np
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, List, Any
 
 try:
     from src.classifier import is_available as _classifier_available, predict_card as _predict_card
 except ImportError:
     _classifier_available = lambda: False
     _predict_card = None
+
+# Arena detectors: Roboflow (optional) then local .pth (image detector/arena_detector.py)
+_roboflow_arena_detector_instance: Optional[Any] = None
+_arena_detector_instance: Optional[Any] = None
+
+def _get_roboflow_arena_detector() -> Optional[Any]:
+    """Load Roboflow arena detector if configured (config + ROBOFLOW_API_KEY)."""
+    global _roboflow_arena_detector_instance
+    if _roboflow_arena_detector_instance is not None:
+        return _roboflow_arena_detector_instance
+    try:
+        from src.roboflow_arena_detector import is_available as _rob_avail, load_detector as _rob_load
+        if _rob_avail():
+            _roboflow_arena_detector_instance = _rob_load()
+    except Exception:
+        pass
+    return _roboflow_arena_detector_instance
+
+def _arena_detector_module():
+    """Load arena_detector.py from the 'image detector' folder (path has a space)."""
+    import importlib.util
+    _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    path = os.path.join(_root, "image detector", "arena_detector.py")
+    if not os.path.isfile(path):
+        return None
+    spec = importlib.util.spec_from_file_location("arena_detector", path)
+    if not spec or not spec.loader:
+        return None
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+def _arena_detector_available() -> bool:
+    mod = _arena_detector_module()
+    return mod is not None and getattr(mod, "is_available", lambda: False)()
+
+def _get_arena_detector() -> Optional[Any]:
+    global _arena_detector_instance
+    if _arena_detector_instance is not None:
+        return _arena_detector_instance
+    mod = _arena_detector_module()
+    if mod:
+        _arena_detector_instance = getattr(mod, "load_detector", lambda: None)()
+    return _arena_detector_instance
 
 
 # ——— Card slot layout (fractions of game frame width/height) ———
@@ -76,6 +118,7 @@ class ArenaUnitMatch:
     confidence: float
     center_x: int
     center_y: int
+    side: str = "left"  # "left" or "right" (inferred from arena center; map to player/enemy as needed)
 
 
 def load_card_templates(
@@ -254,36 +297,59 @@ def get_arena_region() -> tuple[float, float, float, float]:
 
 def detect_units_on_arena(
     screenshot: np.ndarray,
-    arena_templates: dict[str, np.ndarray],
+    arena_templates: Optional[dict[str, np.ndarray]] = None,
     threshold: float = 0.75,
     scales: Optional[list[float]] = None,
+    arena_detector: Optional[Any] = None,
 ) -> list[ArenaUnitMatch]:
     """
-    Detect troops/spells as they appear on the battlefield (placed in the arena).
+    Detect troops/spells on the battlefield (arena).
 
-    Use templates that show each unit **on the arena** (the in-game sprite), not the card art.
-    Load from a separate folder, e.g. load_card_templates("assets/arena").
+    Detection order: 1) Roboflow Universe model (if configured in config/roboflow_arena_config.py),
+    2) local RetinaNet (image detector/arena_detector.pth), 3) template matching (arena_templates).
+    Pass arena_detector to force a specific detector instance.
 
     Args:
         screenshot: Full game frame (BGR).
-        arena_templates: Dict of unit_id -> template (sprite as seen on battlefield).
-        threshold: Minimum match score (0.0–1.0).
-        scales: Template scales to try (e.g. [0.7, 1.0, 1.3]). None = [1.0] only.
+        arena_templates: Optional dict unit_id -> template; used only when no detector.
+        threshold: Min confidence (detector) or match score (templates). 0.0–1.0.
+        scales: Template scales when using templates (e.g. [0.7, 1.0, 1.3]). Ignored if detector used.
+        arena_detector: Optional detector instance (Roboflow or local). If None, auto-selects.
 
     Returns:
-        List of ArenaUnitMatch (unit_id, confidence, center_x, center_y) in frame coordinates.
+        List of ArenaUnitMatch (unit_id, confidence, center_x, center_y, side) in frame coordinates.
     """
-    if not arena_templates:
-        return []
-    if scales is None:
-        scales = [1.0]
     h, w = screenshot.shape[:2]
     x1, y1, x2, y2 = get_arena_region()
     px1, py1 = int(x1 * w), int(y1 * h)
     px2, py2 = int(x2 * w), int(y2 * h)
+    arena_center_x = (px1 + px2) // 2
     arena_crop = screenshot[py1:py2, px1:px2]
     if arena_crop.size == 0:
         return []
+
+    # 1) Caller-provided detector, 2) Roboflow Universe model, 3) local .pth detector
+    detector = arena_detector
+    if detector is None:
+        detector = _get_roboflow_arena_detector()
+    if detector is None:
+        detector = _get_arena_detector()
+    if detector is not None:
+        dets = detector.predict(arena_crop, confidence_threshold=threshold)
+        results: list[ArenaUnitMatch] = []
+        for unit_id, conf, cx, cy in dets:
+            # cx, cy are in crop coords; convert to frame
+            frame_cx = px1 + cx
+            frame_cy = py1 + cy
+            side = "left" if frame_cx < arena_center_x else "right"
+            results.append(ArenaUnitMatch(unit_id=unit_id, confidence=conf, center_x=frame_cx, center_y=frame_cy, side=side))
+        return results
+
+    # Fallback: template matching
+    if not arena_templates:
+        return []
+    if scales is None:
+        scales = [1.0]
     found: list[tuple[str, float, int, int]] = []
     for unit_id, template in arena_templates.items():
         th, tw = template.shape[:2]
@@ -305,16 +371,125 @@ def detect_units_on_arena(
                 best_cy = py1 + max_loc[1] + th_s // 2
         if best_score >= threshold:
             found.append((unit_id, best_score, best_cx, best_cy))
-    # Deduplicate overlapping detections (same unit at multiple scales): keep highest score per unit
     found.sort(key=lambda x: -x[1])
     seen_centers: list[tuple[int, int]] = []
-    results: list[ArenaUnitMatch] = []
+    results = []
     for unit_id, conf, cx, cy in found:
         too_close = any(abs(cx - sx) < 30 and abs(cy - sy) < 30 for sx, sy in seen_centers)
         if not too_close:
             seen_centers.append((cx, cy))
-            results.append(ArenaUnitMatch(unit_id=unit_id, confidence=conf, center_x=cx, center_y=cy))
+            side = "left" if cx < arena_center_x else "right"
+            results.append(ArenaUnitMatch(unit_id=unit_id, confidence=conf, center_x=cx, center_y=cy, side=side))
     return results
+
+
+@dataclass
+class TrackedArenaUnit:
+    """A troop on the arena with a stable identity across frames (position tracked over time)."""
+    track_id: int
+    unit_id: str
+    x: int
+    y: int
+    side: str
+    confidence: float
+    frames_since_seen: int = 0
+
+
+class ArenaTracker:
+    """
+    Tracks arena units across frames: assigns stable IDs and keeps their positions updated.
+    Detects troops from both sides (left/right); use .side to distinguish.
+    """
+
+    def __init__(
+        self,
+        max_distance_px: int = 60,
+        max_frames_lost: int = 10,
+    ):
+        self.max_distance_px = max_distance_px
+        self.max_frames_lost = max_frames_lost
+        self._tracks: dict[int, TrackedArenaUnit] = {}
+        self._next_id = 0
+        self._frame_id = 0
+
+    def update(
+        self,
+        screenshot: np.ndarray,
+        arena_templates: Optional[dict[str, np.ndarray]] = None,
+        threshold: float = 0.75,
+        scales: Optional[list[float]] = None,
+        arena_detector: Optional[Any] = None,
+    ) -> List[TrackedArenaUnit]:
+        """
+        Run arena detection and match detections to existing tracks by position.
+        Uses object detector when available (or when arena_detector is passed); else template matching.
+        Returns list of currently tracked units with their latest positions.
+        """
+        self._frame_id += 1
+        detections = detect_units_on_arena(
+            screenshot,
+            arena_templates=arena_templates,
+            threshold=threshold,
+            scales=scales,
+            arena_detector=arena_detector,
+        )
+        # (unit_id, x, y, side, conf); sort by confidence so strong detections get first pick of tracks
+        dets = [(m.unit_id, m.center_x, m.center_y, m.side, m.confidence) for m in detections]
+        dets.sort(key=lambda d: -d[4])
+        used = set()
+        # Match each detection to nearest existing track within max_distance
+        for unit_id, dx, dy, side, conf in dets:
+            best_tid: Optional[int] = None
+            best_dist = self.max_distance_px + 1
+            for tid, t in self._tracks.items():
+                if tid in used:
+                    continue
+                dist = (t.x - dx) ** 2 + (t.y - dy) ** 2
+                if dist <= best_dist and dist <= self.max_distance_px ** 2:
+                    best_dist = dist
+                    best_tid = tid
+            if best_tid is not None:
+                used.add(best_tid)
+                self._tracks[best_tid] = TrackedArenaUnit(
+                    track_id=best_tid,
+                    unit_id=unit_id,
+                    x=dx,
+                    y=dy,
+                    side=side,
+                    confidence=conf,
+                    frames_since_seen=0,
+                )
+            else:
+                self._tracks[self._next_id] = TrackedArenaUnit(
+                    track_id=self._next_id,
+                    unit_id=unit_id,
+                    x=dx,
+                    y=dy,
+                    side=side,
+                    confidence=conf,
+                    frames_since_seen=0,
+                )
+                self._next_id += 1
+        # Increment frames_since_seen for unmatched tracks and drop stale ones
+        for tid in list(self._tracks.keys()):
+            if tid not in used:
+                t = self._tracks[tid]
+                self._tracks[tid] = TrackedArenaUnit(
+                    track_id=t.track_id,
+                    unit_id=t.unit_id,
+                    x=t.x,
+                    y=t.y,
+                    side=t.side,
+                    confidence=t.confidence,
+                    frames_since_seen=t.frames_since_seen + 1,
+                )
+                if self._tracks[tid].frames_since_seen > self.max_frames_lost:
+                    del self._tracks[tid]
+        return [t for t in self._tracks.values() if t.frames_since_seen == 0]
+
+    def get_all_tracks(self) -> List[TrackedArenaUnit]:
+        """Return all tracks (including those not seen this frame; use frames_since_seen to filter)."""
+        return list(self._tracks.values())
 
 
 def _template_match_best(
