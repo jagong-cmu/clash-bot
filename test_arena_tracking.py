@@ -28,6 +28,7 @@ from src.detection import (
     load_card_templates,
     ArenaTracker,
     get_arena_region,
+    _get_pyclashbot_arena_detector,
     _get_roboflow_arena_detector,
     _arena_detector_available,
     _get_arena_detector,
@@ -45,26 +46,46 @@ def main():
     parser.add_argument("--save-arena", metavar="PATH", default=None, help="Save the arena crop to PATH and exit (to verify crop region)")
     parser.add_argument("--save-troops", metavar="DIR", default=None, help="Save a crop of each detected troop to DIR (filename: troop_<id>_<unit>_<conf>.png)")
     parser.add_argument("--troop-crop-size", type=int, default=96, help="Side length of the square crop around each troop (default 96)")
+    parser.add_argument("--debug-detection", action="store_true", help="Save image sent to model and print all raw detections (before arena filter)")
     args = parser.parse_args()
 
-    arena_detector = _get_roboflow_arena_detector()
-    if not arena_detector:
-        arena_detector = _get_arena_detector() if _arena_detector_available() else None
-    arena_templates = load_card_templates(ARENA_DIR) if not arena_detector else None
+    use_template_only = False
+    try:
+        from config.arena_detection_config import USE_TEMPLATE_MATCHING_ONLY
+        use_template_only = bool(USE_TEMPLATE_MATCHING_ONLY)
+    except (ImportError, AttributeError):
+        pass
+
+    if use_template_only:
+        arena_detector = None
+        arena_templates = load_card_templates(ARENA_DIR)
+    else:
+        arena_detector = _get_pyclashbot_arena_detector()
+        if not arena_detector:
+            arena_detector = _get_roboflow_arena_detector()
+        if not arena_detector:
+            arena_detector = _get_arena_detector() if _arena_detector_available() else None
+        arena_templates = load_card_templates(ARENA_DIR) if not arena_detector else None
 
     if arena_detector:
         name = getattr(arena_detector, "__class__", type(arena_detector)).__name__
-        if "Roboflow" in name:
+        if "PyClashBot" in name:
+            print("Using PyClashBot-style arena detection (assets/arena/)")
+        elif "Roboflow" in name:
             print("Using Roboflow Universe arena model (config/roboflow_arena_config.py)")
         else:
             print("Using local arena detector (arena_detector.pth)")
     elif arena_templates:
-        print(f"Using template matching: {len(arena_templates)} templates in assets/arena/")
+        if use_template_only:
+            print("Using template matching only (config/arena_detection_config.py USE_TEMPLATE_MATCHING_ONLY)")
+        else:
+            print(f"Using template matching: {len(arena_templates)} templates in assets/arena/")
     else:
         print("No arena detector available.")
         print("Option 1: Configure Roboflow model in config/roboflow_arena_config.py and set ROBOFLOW_API_KEY")
         print("Option 2: Train a model: python \"image detector/train_arena_detector.py\" --data-dir data/arena_dataset")
         print("Option 3: Add template images to assets/arena/ (e.g. hog_rider.png)")
+        print("Option 4: Set USE_TEMPLATE_MATCHING_ONLY=True in config/arena_detection_config.py and add images to assets/arena/")
         return 1
 
     coords = get_window_coordinates(args.window)
@@ -91,6 +112,37 @@ def main():
         print("Saved arena crop to:", path)
         print("Open it and check: it should show only the battlefield (no hand, no top UI).")
         print("If not, edit config/arena_region.py (ARENA_TOP/BOTTOM/LEFT/RIGHT).")
+        return 0
+
+    if args.debug_detection and arena_detector:
+        print("Debug mode: capturing and running detector with low threshold (0.1)...")
+        time.sleep(2)
+        screen = capture_screen_region(game_x, game_y, game_width, game_height)
+        if screen is not None and screen.size > 0:
+            use_full = False
+            try:
+                from config.roboflow_arena_config import USE_FULL_FRAME
+                use_full = bool(USE_FULL_FRAME)
+            except (ImportError, AttributeError):
+                pass
+            if use_full:
+                image_for_model = screen
+                cv2.imwrite("debug_detection_input.png", image_for_model)
+                print("Saved image sent to model: debug_detection_input.png (full frame)")
+            else:
+                x1, y1, x2, y2 = get_arena_region()
+                h, w = screen.shape[:2]
+                px1, py1 = int(x1 * w), int(y1 * h)
+                px2, py2 = int(x2 * w), int(y2 * h)
+                image_for_model = screen[py1:py2, px1:px2]
+                cv2.imwrite("debug_detection_input.png", image_for_model)
+                print("Saved image sent to model: debug_detection_input.png (arena crop)")
+            raw = arena_detector.predict(image_for_model, confidence_threshold=0.1)
+            print(f"Raw detections (threshold 0.1): {len(raw)}")
+            for u, c, x, y in raw:
+                print(f"  {u} conf={c:.2f} at ({x}, {y})")
+        else:
+            print("Capture failed.")
         return 0
 
     tracker = ArenaTracker(max_distance_px=60, max_frames_lost=10)

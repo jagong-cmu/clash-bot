@@ -23,6 +23,28 @@ except ImportError:
 _roboflow_arena_detector_instance: Optional[Any] = None
 _arena_detector_instance: Optional[Any] = None
 
+_pyclashbot_arena_detector_instance: Optional[Any] = None
+
+def _get_pyclashbot_arena_detector() -> Optional[Any]:
+    """Load PyClashBot-style arena detector if configured and reference folder has images."""
+    global _pyclashbot_arena_detector_instance
+    if _pyclashbot_arena_detector_instance is not None:
+        return _pyclashbot_arena_detector_instance
+    use_pyclashbot = False
+    try:
+        from config.arena_detection_config import USE_PYCLASHBOT_ARENA
+        use_pyclashbot = bool(USE_PYCLASHBOT_ARENA)
+    except (ImportError, AttributeError):
+        pass
+    if use_pyclashbot:
+        try:
+            from src.pyclashbot_arena import is_available as _avail, load_detector as _load
+            if _avail():
+                _pyclashbot_arena_detector_instance = _load()
+        except Exception:
+            pass
+    return _pyclashbot_arena_detector_instance
+
 def _get_roboflow_arena_detector() -> Optional[Any]:
     """Load Roboflow arena detector if configured (config + ROBOFLOW_API_KEY)."""
     global _roboflow_arena_detector_instance
@@ -310,8 +332,8 @@ def detect_units_on_arena(
     """
     Detect troops/spells on the battlefield (arena).
 
-    Detection order: 1) Roboflow Universe model (if configured in config/roboflow_arena_config.py),
-    2) local RetinaNet (image detector/arena_detector.pth), 3) template matching (arena_templates).
+    Detection order: 1) PyClashBot-style (if USE_PYCLASHBOT_ARENA and assets/arena/),
+    2) Roboflow Universe, 3) local RetinaNet (arena_detector.pth), 4) template matching (arena_templates).
     Pass arena_detector to force a specific detector instance.
 
     Args:
@@ -333,12 +355,22 @@ def detect_units_on_arena(
     if arena_crop.size == 0:
         return []
 
-    # 1) Caller-provided detector, 2) Roboflow Universe model, 3) local .pth detector
-    detector = arena_detector
-    if detector is None:
-        detector = _get_roboflow_arena_detector()
-    if detector is None:
-        detector = _get_arena_detector()
+    use_template_only = False
+    try:
+        from config.arena_detection_config import USE_TEMPLATE_MATCHING_ONLY
+        use_template_only = bool(USE_TEMPLATE_MATCHING_ONLY)
+    except (ImportError, AttributeError):
+        pass
+    if use_template_only and arena_templates:
+        detector = None
+    else:
+        detector = arena_detector
+        if detector is None:
+            detector = _get_pyclashbot_arena_detector()
+        if detector is None:
+            detector = _get_roboflow_arena_detector()
+        if detector is None:
+            detector = _get_arena_detector()
     if detector is not None:
         use_full_frame = False
         try:

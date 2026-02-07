@@ -1,6 +1,18 @@
 # Arena unit detection (object detection)
 
-Arena detection can use, in order: **Roboflow Universe** (pre-trained model), **local RetinaNet** (trained by you), or **template matching**.
+Arena detection can use, in order: **PyClashBot-style** (template matching from [py-clash-bot](https://github.com/pyclashbot/py-clash-bot)), **Roboflow Universe**, **local RetinaNet**, or **template matching**.
+
+---
+
+## PyClashBot-style (no training, no API)
+
+Uses the same algorithm as [py-clash-bot](https://github.com/pyclashbot/py-clash-bot)’s [image_rec.py](https://github.com/pyclashbot/py-clash-bot/blob/master/pyclashbot/detection/image_rec.py): grayscale template matching over reference images. No ML model or API key.
+
+1. Set **USE_PYCLASHBOT_ARENA = True** in **config/arena_detection_config.py** (default).
+2. Put one image per troop in **assets/arena/** (e.g. `knight.png`, `hog_rider.png`) — the unit as it appears on the battlefield.
+3. Run **python test_arena_tracking.py**. You should see “Using PyClashBot-style arena detection”.
+
+Templates are matched at a single scale; if your game resolution differs a lot, add multiple reference images or tune threshold with **--threshold 0.6**.
 
 ---
 

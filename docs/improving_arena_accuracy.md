@@ -4,6 +4,55 @@ If the model misses troops, mislabels them, or gives too many false positives, t
 
 ---
 
+## When the model doesn’t work at all: alternatives
+
+### 1. Force template matching (no model)
+
+Use only image templates and skip Roboflow/local model:
+
+1. In **config/arena_detection_config.py** set **`USE_TEMPLATE_MATCHING_ONLY = True`**.
+2. Add one image per troop to **assets/arena/** (e.g. `knight.png`, `hog_rider.png`). Each file should be a crop of that unit as it appears on the battlefield.
+3. Run **`python test_arena_tracking.py`**. You should see “Using template matching only”.
+4. Use **`--threshold 0.6`** (or lower) if you get no matches; template matching is sensitive to scale, so the script tries several scales.
+
+**Pros:** No API, no training, works offline. **Cons:** One image per unit; fragile to big resolution or aspect changes.
+
+### 2. See what the model actually returns (debug)
+
+Check whether the model produces any detections at all:
+
+```bash
+python test_arena_tracking.py --debug-detection
+```
+
+This saves the image sent to the model as **debug_detection_input.png** and prints every detection with confidence ≥ 0.1. If the list is empty, the model isn’t detecting on your input (wrong image size, wrong crop, or model mismatch). If there are detections but they’re outside the arena, the arena filter may be too strict or the coordinates wrong.
+
+### 3. Try another Roboflow model
+
+Search [Roboflow Universe](https://universe.roboflow.com) for “Clash Royale” or “troop detection”. Pick another model and set **ROBOFLOW_ARENA_MODEL_ID** in **config/roboflow_arena_config.py** to that model’s ID (`project_id/version`).
+
+### 4. Use your trained model and disable Roboflow
+
+If you trained **arena_detector.pth** on the same kind of images you see at runtime:
+
+1. In **config/roboflow_arena_config.py** set **ROBOFLOW_API_KEY = None** (or remove it) so the Roboflow model isn’t loaded.
+2. Set **USE_FULL_FRAME** to match your training data: **True** if training images were full screens, **False** if they were arena crops only.
+3. Run with **`--threshold 0.3`** or **0.4** and then tune.
+
+### 5. Train a new model on your own screenshots
+
+Capture screens from your actual setup (same device/mirror), label troops, export COCO, and train:
+
+```bash
+python "image detector/train_arena_detector.py" --data-dir data/arena_dataset --epochs 25
+```
+
+Then use that **arena_detector.pth** with Roboflow disabled and **USE_FULL_FRAME** set to match how you cropped (or didn’t) in the dataset.
+
+---
+
+---
+
 ## 1. Match what the model was trained on
 
 **Roboflow model:**  
