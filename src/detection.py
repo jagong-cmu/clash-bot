@@ -314,8 +314,8 @@ def detect_units_on_arena(
     """
     Detect troops/spells on the battlefield (arena).
 
-    Detection order: 1) Roboflow Universe model (if configured in config/roboflow_arena_config.py),
-    2) local RetinaNet (image detector/arena_detector.pth), 3) template matching (arena_templates).
+    Detection order: 1) local RetinaNet (image detector/arena_detector.pth), 2) Roboflow Universe model
+    (if configured in config/roboflow_arena_config.py), 3) template matching (arena_templates).
     Pass arena_detector to force a specific detector instance.
 
     Args:
@@ -337,12 +337,12 @@ def detect_units_on_arena(
     if arena_crop.size == 0:
         return []
 
-    # 1) Caller-provided detector, 2) Roboflow Universe model, 3) local .pth detector
+    # 1) Caller-provided detector, 2) local RetinaNet (.pth), 3) Roboflow Universe model
     detector = arena_detector
     if detector is None:
-        detector = _get_roboflow_arena_detector()
+        detector = _get_arena_detector()  # RetinaNet first
     if detector is None:
-        detector = _get_arena_detector()
+        detector = _get_roboflow_arena_detector()  # Roboflow as fallback
     if detector is not None:
         dets = detector.predict(arena_crop, confidence_threshold=threshold)
         results: list[ArenaUnitMatch] = []

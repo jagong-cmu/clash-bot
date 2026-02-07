@@ -51,9 +51,10 @@ def main():
     parser.add_argument("--troop-crop-size", type=int, default=128, help="Size of square crop around each detected troop (default: 128)")
     args = parser.parse_args()
 
-    arena_detector = _get_roboflow_arena_detector()
+    # Prioritize RetinaNet over Roboflow
+    arena_detector = _get_arena_detector() if _arena_detector_available() else None
     if not arena_detector:
-        arena_detector = _get_arena_detector() if _arena_detector_available() else None
+        arena_detector = _get_roboflow_arena_detector()
     arena_templates = load_card_templates(ARENA_DIR) if not arena_detector else None
 
     if arena_detector:
